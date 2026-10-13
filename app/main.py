@@ -12,11 +12,22 @@ decision layer against its cited passages; clear cases ship or are
 cut, borderline cases escalate to the checker model, and anything
 the checker cannot settle comes back "uncertain" rather than
 guessed.
+Commit 7: questionnaire endpoint builds the answer sheet (only
+supported claims ship, every claim leaves an evidence trail), and
+the review queue endpoint lists everything a human still has to
+decide. The sheet is held in memory; building a new one replaces it.
 """
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.answers import (
+    AnswerSheet,
+    QuestionItem,
+    AnswerSheetService,
+    render_markdown,
+    review_queue,
+)
 from app.checking import claim_checker_from_settings, split_claims
 from app.config import load_settings
 from app.decision import DecisionService
@@ -190,3 +201,130 @@ def check(request: CheckRequest) -> CheckOut:
         escalated=sum(1 for v in verdicts if v.route == "escalated"),
     )
     return CheckOut(question=request.question, claims=verdicts, summary=summary)
+
+
+class QuestionnaireItemIn(BaseModel):
+    question: str
+    passages: list[PassageIn]
+
+
+class QuestionnaireRequest(BaseModel):
+    items: list[QuestionnaireItemIn]
+
+
+class EvidenceOut(BaseModel):
+    claim: str
+    verdict: str
+    citations: list[str]
+    sources: list[str]
+    checked_by: str
+    precheck_probability: float | None
+    reason: str
+
+
+class AnswerEntryOut(BaseModel):
+    question: str
+    status: str
+    shipped_answer: str
+    evidence_trail: list[EvidenceOut]
+    flags: list[str]
+
+
+class AnswerSheetOut(BaseModel):
+    entries: list[AnswerEntryOut]
+    counts: dict
+    markdown: str
+
+
+class ReviewItemOut(BaseModel):
+    question: str
+    status: str
+    reasons: list[str]
+    blocked_claims: list[EvidenceOut]
+
+
+def _sheet_out(sheet: AnswerSheet) -> AnswerSheetOut:
+    return AnswerSheetOut(
+        entries=[
+            AnswerEntryOut(
+                question=e.question,
+                status=e.status,
+                shipped_answer=e.shipped_answer,
+                evidence_trail=[
+                    EvidenceOut(
+                        claim=t.claim, verdict=t.verdict,
+                        citations=t.citations, sources=t.sources,
+                        checked_by=t.checked_by,
+                        precheck_probability=t.precheck_probability,
+                        reason=t.reason,
+                    )
+                    for t in e.evidence_trail
+                ],
+                flags=e.flags,
+            )
+            for e in sheet.entries
+        ],
+        counts=sheet.counts,
+        markdown=render_markdown(sheet),
+    )
+
+
+def _stored_sheet() -> AnswerSheet:
+    sheet = getattr(app.state, "answer_sheet", None)
+    if sheet is None:
+        raise HTTPException(
+            status_code=404,
+            detail="no answer sheet built yet; POST /questionnaire first",
+        )
+    return sheet
+
+
+@app.post("/questionnaire", response_model=AnswerSheetOut)
+def questionnaire(request: QuestionnaireRequest) -> AnswerSheetOut:
+    service = AnswerSheetService(
+        drafting=drafting_service_from_settings(settings),
+        checker=claim_checker_from_settings(settings),
+    )
+    items = [
+        QuestionItem(
+            question=item.question,
+            passages=[
+                Passage(id=p.id, source=p.source, text=p.text)
+                for p in item.passages
+            ],
+        )
+        for item in request.items
+    ]
+    try:
+        sheet = service.build(items)
+    except (DraftingError, VLLMError) as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    app.state.answer_sheet = sheet
+    return _sheet_out(sheet)
+
+
+@app.get("/answers", response_model=AnswerSheetOut)
+def answers() -> AnswerSheetOut:
+    return _sheet_out(_stored_sheet())
+
+
+@app.get("/review-queue", response_model=list[ReviewItemOut])
+def review() -> list[ReviewItemOut]:
+    return [
+        ReviewItemOut(
+            question=item.question,
+            status=item.status,
+            reasons=item.reasons,
+            blocked_claims=[
+                EvidenceOut(
+                    claim=t.claim, verdict=t.verdict,
+                    citations=t.citations, sources=t.sources,
+                    checked_by=t.checked_by,
+                    precheck_probability=t.precheck_probability,
+                    reason=t.reason,
+                )
+                for t in item.blocked_claims
+            ],
+        )
+        for item in review_queue(_stored_sheet())
+    ]
