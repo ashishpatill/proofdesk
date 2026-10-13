@@ -159,3 +159,119 @@ class DecisionService:
             except DecisionError:
                 results.append(self._fallback.triage(question))
         return results
+
+
+# ------------------------------------------------------------------
+# Claim-support pre-check (commit 6). Second decision task from the
+# build pack: per drafted claim, a probability that the cited
+# passage supports the claim. Same sidecar, second task name:
+#
+#     POST {decision_base_url}/decide
+#     {"model": ..., "task": "claim-support",
+#      "input": {"claim": str, "passage": str}}
+#     -> {"supported": bool, "probability": float 0..1}
+#
+# The routing bands live in app/checking.py, not here: this layer
+# only produces the probability and names its backend.
+# ------------------------------------------------------------------
+
+import re
+
+_STOPWORDS = frozenset(
+    "the a an and or of to in is are we our you your it its for on "
+    "with as at by be this that from have has do does".split()
+)
+
+
+@dataclass(frozen=True)
+class ClaimSupportResult:
+    claim: str
+    supported: bool
+    probability: float
+    backend: str  # "d3" or "rules"
+
+
+def _significant_tokens(text: str) -> set[str]:
+    return {
+        tok
+        for tok in re.findall(r"[a-z0-9][a-z0-9\-]*", text.lower())
+        if len(tok) > 2 and tok not in _STOPWORDS
+    }
+
+
+class RulesClaimSupportBackend:
+    """Deterministic fallback: lexical overlap between the claim and
+    the passage. The probability is the share of the claim's
+    significant tokens that also appear in the passage. Crude, and
+    named as rules wherever it is used — it is a pre-check, not a
+    judgement; borderline cases escalate to the checker model."""
+
+    name = "rules"
+
+    def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
+        claim_tokens = _significant_tokens(claim)
+        if not claim_tokens:
+            return ClaimSupportResult(
+                claim=claim, supported=False, probability=0.0,
+                backend=self.name,
+            )
+        passage_tokens = _significant_tokens(passage)
+        probability = len(claim_tokens & passage_tokens) / len(claim_tokens)
+        return ClaimSupportResult(
+            claim=claim,
+            supported=probability >= 0.5,
+            probability=round(probability, 4),
+            backend=self.name,
+        )
+
+
+class HTTPClaimSupportBackend:
+    """Calls the d3-lite sidecar for claim support; raises
+    DecisionError on any failure so the service can fall back."""
+
+    name = "d3"
+
+    def __init__(self, settings: Settings, timeout: float = 10.0) -> None:
+        self._base = settings.decision_base_url.rstrip("/")
+        self._model = settings.decision_model
+        self._timeout = timeout
+
+    def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
+        payload = {
+            "model": self._model,
+            "task": "claim-support",
+            "input": {"claim": claim, "passage": passage},
+        }
+        try:
+            resp = httpx.post(
+                f"{self._base}/decide",
+                json=payload,
+                timeout=self._timeout,
+                trust_env=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            supported = bool(data["supported"])
+            probability = float(data["probability"])
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            raise DecisionError(f"d3 claim-support call failed: {exc}") from exc
+        if not 0.0 <= probability <= 1.0:
+            raise DecisionError("d3 claim-support probability outside 0..1")
+        return ClaimSupportResult(
+            claim=claim, supported=supported, probability=probability,
+            backend=self.name,
+        )
+
+
+class ClaimSupportService:
+    """d3 first, rules on any failure — same discipline as triage."""
+
+    def __init__(self, settings: Settings, timeout: float = 10.0) -> None:
+        self._primary = HTTPClaimSupportBackend(settings, timeout=timeout)
+        self._fallback = RulesClaimSupportBackend()
+
+    def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
+        try:
+            return self._primary.claim_support(claim, passage)
+        except DecisionError:
+            return self._fallback.claim_support(claim, passage)

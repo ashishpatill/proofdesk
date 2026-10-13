@@ -7,14 +7,22 @@ behind a triage endpoint for incoming questionnaire questions.
 Commit 5: drafting endpoint. The drafter writes an answer with
 citations from supplied passages only; untraceable citations and
 malformed output fail the request instead of shipping.
+Commit 6: claim checking endpoint. Each claim is pre-checked by the
+decision layer against its cited passages; clear cases ship or are
+cut, borderline cases escalate to the checker model, and anything
+the checker cannot settle comes back "uncertain" rather than
+guessed.
 """
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.checking import claim_checker_from_settings, split_claims
 from app.config import load_settings
 from app.decision import DecisionService
 from app.drafting import (
+    Claim,
+    DraftResult,
     DraftingError,
     Passage,
     drafting_service_from_settings,
@@ -106,3 +114,79 @@ def draft(request: DraftRequest) -> DraftOut:
         ],
         model=result.model,
     )
+
+
+class CheckRequest(BaseModel):
+    question: str = ""
+    answer: str = ""
+    claims: list[ClaimOut] = []
+    passages: list[PassageIn]
+
+
+class ClaimVerdictOut(BaseModel):
+    text: str
+    citations: list[str]
+    precheck_probability: float | None
+    precheck_backend: str | None
+    route: str
+    verdict: str
+    checked_by: str
+    reason: str
+
+
+class CheckSummary(BaseModel):
+    total: int
+    supported: int
+    unsupported: int
+    uncertain: int
+    escalated: int
+
+
+class CheckOut(BaseModel):
+    question: str
+    claims: list[ClaimVerdictOut]
+    summary: CheckSummary
+
+
+@app.post("/check", response_model=CheckOut)
+def check(request: CheckRequest) -> CheckOut:
+    passages = [
+        Passage(id=p.id, source=p.source, text=p.text) for p in request.passages
+    ]
+    if request.claims:
+        claims = [
+            Claim(text=c.text, citations=c.citations) for c in request.claims
+        ]
+    else:
+        # Plain-text answer: split it into claims. They carry no
+        # citations, so each one escalates to the checker with all
+        # supplied passages as context; none ships on a pre-check.
+        claims = [
+            Claim(text=text, citations=[]) for text in split_claims(request.answer)
+        ]
+    draft = DraftResult(
+        question=request.question, answer=request.answer,
+        claims=claims, model="",
+    )
+    checked = claim_checker_from_settings(settings).check_draft(draft, passages)
+    verdicts = [
+        ClaimVerdictOut(
+            text=v.text,
+            citations=v.citations,
+            precheck_probability=v.precheck_probability,
+            precheck_backend=v.precheck_backend,
+            route=v.route,
+            verdict=v.verdict,
+            checked_by=v.checked_by,
+            reason=v.reason,
+        )
+        for v in checked.verdicts
+    ]
+    summary = CheckSummary(
+        total=len(verdicts),
+        supported=sum(1 for v in verdicts if v.verdict == "supported"),
+        unsupported=sum(1 for v in verdicts if v.verdict == "unsupported"),
+        uncertain=sum(1 for v in verdicts if v.verdict == "uncertain"),
+        escalated=sum(1 for v in verdicts if v.route == "escalated"),
+    )
+    return CheckOut(question=request.question, claims=verdicts, summary=summary)
