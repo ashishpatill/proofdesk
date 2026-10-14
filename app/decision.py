@@ -143,12 +143,12 @@ class HTTPDecisionBackend:
 
 
 class DecisionService:
-    """d3 first, rules on any failure. One triage call can carry
-    several questions (build pack: intake triage per question, one
-    call, several questions)."""
+    """Configured primary backend first, rules on any failure. One
+    triage call can carry several questions (build pack: intake
+    triage per question, one call, several questions)."""
 
     def __init__(self, settings: Settings, timeout: float = 10.0) -> None:
-        self._primary = HTTPDecisionBackend(settings, timeout=timeout)
+        self._primary = _triage_backend(settings, timeout)
         self._fallback = RulesDecisionBackend()
 
     def triage(self, questions: list[str]) -> list[TriageResult]:
@@ -264,10 +264,11 @@ class HTTPClaimSupportBackend:
 
 
 class ClaimSupportService:
-    """d3 first, rules on any failure — same discipline as triage."""
+    """Configured primary backend first, rules on any failure — same
+    discipline as triage."""
 
     def __init__(self, settings: Settings, timeout: float = 10.0) -> None:
-        self._primary = HTTPClaimSupportBackend(settings, timeout=timeout)
+        self._primary = _claim_support_backend(settings, timeout)
         self._fallback = RulesClaimSupportBackend()
 
     def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
@@ -275,3 +276,140 @@ class ClaimSupportService:
             return self._primary.claim_support(claim, passage)
         except DecisionError:
             return self._fallback.claim_support(claim, passage)
+
+
+# ------------------------------------------------------------------
+# LLM decision backend (option A, hackathon submission build). The
+# decision tasks are served by a chat model on the same
+# OpenAI-compatible endpoint as drafting/checking — for the AMD
+# hackathon that is DeepSeek-V4.1-Flash on AMD Token Factory — asked
+# for JSON only and parsed strictly. Any transport error, malformed
+# JSON, unknown category, or out-of-range score raises DecisionError
+# and the services above fall back to rules, with the backend named
+# in every result. Selected with DECISION_BACKEND=llm; the d3
+# sidecar ("d3") stays the default for the self-hosted build.
+# ------------------------------------------------------------------
+
+import json
+
+from app.vllm_client import VLLMClient, VLLMError
+
+_CATEGORIES = [label for label, _ in _CATEGORY_KEYWORDS] + ["general"]
+
+_TRIAGE_SYSTEM = (
+    "You are the decision layer for a security-questionnaire desk. "
+    "Classify the question and score it. Return JSON only, no prose: "
+    '{"category": one of ' + json.dumps(_CATEGORIES) + ', '
+    '"sensitivity": number 0..1 (how sensitive answering it is), '
+    '"answerable": number 0..1 (how likely a typical company policy '
+    "library can answer it)}"
+)
+
+_CLAIM_SUPPORT_SYSTEM = (
+    "You are the decision layer for a security-questionnaire desk. "
+    "Judge whether the passage supports the claim. Return JSON only, "
+    'no prose: {"supported": true or false, "probability": number '
+    "0..1 (probability the passage supports the claim)}"
+)
+
+
+def _parse_json_object(text: str) -> dict:
+    start, end = text.find("{"), text.rfind("}")
+    if start == -1 or end <= start:
+        raise DecisionError("decision model returned no JSON object")
+    try:
+        data = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise DecisionError(f"decision model returned bad JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise DecisionError("decision model returned a non-object JSON")
+    return data
+
+
+def _score(data: dict, field: str) -> float:
+    try:
+        value = float(data[field])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise DecisionError(f"decision model reply missing {field}") from exc
+    if not 0.0 <= value <= 1.0:
+        raise DecisionError(f"decision model {field} outside 0..1")
+    return value
+
+
+class LLMTriageBackend:
+    name = "llm"
+
+    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+        self._client = VLLMClient(settings, timeout=timeout)
+        self._model = settings.decision_model
+
+    def triage(self, question: str) -> TriageResult:
+        try:
+            text = self._client.chat(
+                self._model,
+                [
+                    {"role": "system", "content": _TRIAGE_SYSTEM},
+                    {"role": "user", "content": question},
+                ],
+                temperature=0.0,
+                max_tokens=256,
+            )
+        except VLLMError as exc:
+            raise DecisionError(f"llm triage call failed: {exc}") from exc
+        data = _parse_json_object(text)
+        category = str(data.get("category", ""))
+        if category not in _CATEGORIES:
+            raise DecisionError(f"llm triage returned unknown category {category!r}")
+        return TriageResult(
+            question=question,
+            category=category,
+            sensitivity=_score(data, "sensitivity"),
+            answerable=_score(data, "answerable"),
+            backend=self.name,
+        )
+
+
+class LLMClaimSupportBackend:
+    name = "llm"
+
+    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+        self._client = VLLMClient(settings, timeout=timeout)
+        self._model = settings.decision_model
+
+    def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
+        prompt = f"Claim: {claim}\n\nPassage: {passage}"
+        try:
+            text = self._client.chat(
+                self._model,
+                [
+                    {"role": "system", "content": _CLAIM_SUPPORT_SYSTEM},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.0,
+                max_tokens=256,
+            )
+        except VLLMError as exc:
+            raise DecisionError(f"llm claim-support call failed: {exc}") from exc
+        data = _parse_json_object(text)
+        return ClaimSupportResult(
+            claim=claim,
+            supported=bool(data.get("supported")),
+            probability=_score(data, "probability"),
+            backend=self.name,
+        )
+
+
+def _triage_backend(settings: Settings, timeout: float):
+    if settings.decision_backend == "llm":
+        return LLMTriageBackend(settings, timeout=max(timeout, 30.0))
+    if settings.decision_backend == "rules":
+        return RulesDecisionBackend()
+    return HTTPDecisionBackend(settings, timeout=timeout)
+
+
+def _claim_support_backend(settings: Settings, timeout: float):
+    if settings.decision_backend == "llm":
+        return LLMClaimSupportBackend(settings, timeout=max(timeout, 30.0))
+    if settings.decision_backend == "rules":
+        return RulesClaimSupportBackend()
+    return HTTPClaimSupportBackend(settings, timeout=timeout)

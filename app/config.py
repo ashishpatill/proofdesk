@@ -12,6 +12,7 @@ class Settings:
     checker_model: str = "Qwen/Qwen2.5-32B-Instruct"
     decision_base_url: str = "http://localhost:8002"
     decision_model: str = "vllm-sr/d3-lite"
+    decision_backend: str = "d3"  # "d3" sidecar | "llm" chat model | "rules"
     evolus_api_base: str = ""
     evolus_api_key: str = ""
     evolus_application_id: str = ""
@@ -28,6 +29,9 @@ def load_settings() -> Settings:
             "DECISION_BASE_URL", Settings.decision_base_url
         ),
         decision_model=os.environ.get("DECISION_MODEL", Settings.decision_model),
+        decision_backend=os.environ.get(
+            "DECISION_BACKEND", Settings.decision_backend
+        ),
         evolus_api_base=os.environ.get("EVOLUS_API_BASE", ""),
         evolus_api_key=os.environ.get("EVOLUS_API_KEY", ""),
         evolus_application_id=os.environ.get("EVOLUS_APPLICATION_ID", ""),
