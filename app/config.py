@@ -14,6 +14,8 @@ class Settings:
     decision_model: str = "vllm-sr/d3-lite"
     evolus_api_base: str = ""
     evolus_api_key: str = ""
+    evolus_application_id: str = ""
+    evolus_workflow_id: str = ""
 
 
 def load_settings() -> Settings:
@@ -28,4 +30,6 @@ def load_settings() -> Settings:
         decision_model=os.environ.get("DECISION_MODEL", Settings.decision_model),
         evolus_api_base=os.environ.get("EVOLUS_API_BASE", ""),
         evolus_api_key=os.environ.get("EVOLUS_API_KEY", ""),
+        evolus_application_id=os.environ.get("EVOLUS_APPLICATION_ID", ""),
+        evolus_workflow_id=os.environ.get("EVOLUS_WORKFLOW_ID", ""),
     )

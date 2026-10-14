@@ -16,6 +16,8 @@ Commit 7: questionnaire endpoint builds the answer sheet (only
 supported claims ship, every claim leaves an evidence trail), and
 the review queue endpoint lists everything a human still has to
 decide. The sheet is held in memory; building a new one replaces it.
+Commit 8: Evolus dispatch endpoint sends the finished sheet to the
+configured Evolus workflow through the Evolus REST API.
 """
 
 from fastapi import FastAPI, HTTPException
@@ -38,6 +40,7 @@ from app.drafting import (
     Passage,
     drafting_service_from_settings,
 )
+from app.evolus import EvolusError, evolus_client_from_settings
 from app.vllm_client import VLLMClient, VLLMError
 
 settings = load_settings()
@@ -306,6 +309,38 @@ def questionnaire(request: QuestionnaireRequest) -> AnswerSheetOut:
 @app.get("/answers", response_model=AnswerSheetOut)
 def answers() -> AnswerSheetOut:
     return _sheet_out(_stored_sheet())
+
+
+class EvolusDispatchOut(BaseModel):
+    workflow_id: str
+    execution: dict
+
+
+@app.post("/evolus/dispatch", response_model=EvolusDispatchOut)
+def evolus_dispatch() -> EvolusDispatchOut:
+    """Send the current answer sheet to the configured Evolus
+    workflow, where the business process continues (human review,
+    filing, notification). 503 when Evolus is not configured, 502
+    when the Evolus call itself fails."""
+    settings = load_settings()
+    client = evolus_client_from_settings(settings)
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Evolus is not configured (EVOLUS_API_KEY / "
+                   "EVOLUS_APPLICATION_ID missing)",
+        )
+    sheet = _stored_sheet()
+    try:
+        execution = client.execute_workflow(
+            settings.evolus_workflow_id,
+            {"answer_sheet": render_markdown(sheet)},
+        )
+    except EvolusError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return EvolusDispatchOut(
+        workflow_id=settings.evolus_workflow_id, execution=execution
+    )
 
 
 @app.get("/review-queue", response_model=list[ReviewItemOut])
