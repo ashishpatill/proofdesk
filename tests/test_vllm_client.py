@@ -48,3 +48,19 @@ def test_chat_retries_on_429_then_succeeds(monkeypatch):
     monkeypatch.setattr("app.vllm_client.time.sleep", lambda s: None)
     assert make_client().chat("m", []) == "done"
     assert calls["n"] == 3
+
+
+def test_chat_retries_on_timeout_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+    ok = _Resp(200, {"choices": [{"message": {"content": "done"}}]})
+
+    def fake_post(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] < 2:
+            raise httpx.ReadTimeout("slow endpoint")
+        return ok
+
+    monkeypatch.setattr("app.vllm_client.httpx.post", fake_post)
+    monkeypatch.setattr("app.vllm_client.time.sleep", lambda s: None)
+    assert make_client().chat("m", []) == "done"
+    assert calls["n"] == 2

@@ -309,7 +309,12 @@ _CLAIM_SUPPORT_SYSTEM = (
     "You are the decision layer for a security-questionnaire desk. "
     "Judge whether the passage supports the claim. Return JSON only, "
     'no prose: {"supported": true or false, "probability": number '
-    "0..1 (probability the passage supports the claim)}"
+    "0..1 (probability the passage supports the claim)}. "
+    "Claims about absence ('the documents do not mention X', 'no "
+    "other option is published') are supported ONLY if the passage "
+    "states the fact exclusively (words like 'only' or 'sole'); a "
+    "passage that merely fails to mention X does not support a "
+    "claim about X at all."
 )
 
 
@@ -339,7 +344,7 @@ def _score(data: dict, field: str) -> float:
 class LLMTriageBackend:
     name = "llm"
 
-    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+    def __init__(self, settings: Settings, timeout: float = 120.0) -> None:
         self._client = VLLMClient(settings, timeout=timeout)
         self._model = settings.decision_model
 
@@ -372,7 +377,7 @@ class LLMTriageBackend:
 class LLMClaimSupportBackend:
     name = "llm"
 
-    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+    def __init__(self, settings: Settings, timeout: float = 120.0) -> None:
         self._client = VLLMClient(settings, timeout=timeout)
         self._model = settings.decision_model
 

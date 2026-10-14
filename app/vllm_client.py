@@ -19,7 +19,7 @@ class VLLMError(RuntimeError):
 
 
 class VLLMClient:
-    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+    def __init__(self, settings: Settings, timeout: float = 120.0) -> None:
         self._base = settings.vllm_base_url.rstrip("/")
         self._timeout = timeout
         headers = {}
@@ -64,8 +64,10 @@ class VLLMClient:
             "max_tokens": max_tokens,
         }
         # Rate-limited endpoints (AMD Token Factory: 30 RPM per key)
-        # answer bursts with 429. Honour Retry-After when sent, else
-        # back off briefly; three retries, then the error stands.
+        # answer bursts with 429, and a loaded shared endpoint can
+        # stall past the read timeout. Both are transient: honour
+        # Retry-After when sent, else back off briefly; three
+        # retries, then the error stands.
         delays = [2.0, 5.0, 12.0]
         for attempt in range(len(delays) + 1):
             try:
@@ -86,6 +88,11 @@ class VLLMClient:
                     time.sleep(min(delay, 20.0))
                     continue
                 resp.raise_for_status()
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
+                    continue
+                raise VLLMError(f"vLLM chat completion failed: {exc}") from exc
             except httpx.HTTPError as exc:
                 raise VLLMError(f"vLLM chat completion failed: {exc}") from exc
             choices = resp.json().get("choices", [])

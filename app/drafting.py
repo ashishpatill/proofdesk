@@ -32,7 +32,12 @@ _SYSTEM_PROMPT = (
     "Every factual claim in the answer must appear in claims with at "
     "least one citation naming a passage id exactly as given. If the "
     "passages do not answer the question, reply "
-    '{"answer": "", "claims": []}.'
+    '{"answer": "", "claims": []}. '
+    "A claim about what the passages do NOT say (for example 'the "
+    "documents do not mention X' or 'no other option is published') "
+    "is not an answer and must never be drafted: absence in the "
+    "passages means the question is unanswered, so return empty "
+    "claims unless a passage states the fact affirmatively."
 )
 
 
