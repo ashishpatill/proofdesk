@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from app.checking import ClaimChecker, ClaimVerdict
-from app.drafting import DraftingService, Passage
+from app.drafting import DraftingError, DraftingService, Passage
 
 
 @dataclass(frozen=True)
@@ -128,7 +128,18 @@ class AnswerSheetService:
         return AnswerSheet(entries=[self._build_one(item) for item in items])
 
     def _build_one(self, item: QuestionItem) -> AnswerEntry:
-        draft = self._drafting.draft(item.question, item.passages)
+        try:
+            draft = self._drafting.draft(item.question, item.passages)
+        except DraftingError as exc:
+            # One failed question must not sink the whole sheet: it
+            # becomes a hand-off, with the failure on the record.
+            return AnswerEntry(
+                question=item.question,
+                status="handoff",
+                shipped_answer="",
+                evidence_trail=[],
+                flags=[f"drafting failed ({exc}); handed off to a human"],
+            )
         sources = {p.id: p.source for p in item.passages}
         if not draft.claims:
             return AnswerEntry(

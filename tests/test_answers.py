@@ -174,7 +174,9 @@ def test_answers_endpoints_before_any_build_return_404():
     assert client.get("/review-queue").status_code == 404
 
 
-def test_questionnaire_endpoint_fails_honestly_without_vllm():
+def test_questionnaire_endpoint_degrades_honestly_without_vllm():
+    # No model endpoint in the test environment: the question must
+    # come back as a flagged hand-off, not a 502 and not a guess.
     resp = client.post(
         "/questionnaire",
         json={
@@ -188,4 +190,27 @@ def test_questionnaire_endpoint_fails_honestly_without_vllm():
             ]
         },
     )
-    assert resp.status_code == 502
+    assert resp.status_code == 200
+    entry = resp.json()["entries"][0]
+    assert entry["status"] == "handoff"
+    assert entry["shipped_answer"] == ""
+    assert "drafting failed" in entry["flags"][0]
+
+
+class ExplodingDrafting:
+    def draft(self, question, passages):
+        from app.drafting import DraftingError
+
+        raise DraftingError("drafter call failed: boom")
+
+
+def test_drafting_failure_becomes_handoff_not_crash():
+    service = AnswerSheetService(
+        drafting=ExplodingDrafting(),
+        checker=ClaimChecker(
+            support=RulesClaimSupportBackend(), checker=NoChecker()
+        ),
+    )
+    sheet = service.build([QuestionItem(question="Q?", passages=PASSAGES)])
+    assert sheet.entries[0].status == "handoff"
+    assert "drafting failed" in sheet.entries[0].flags[0]

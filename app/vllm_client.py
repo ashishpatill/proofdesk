@@ -7,6 +7,8 @@ never from code.
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from app.config import Settings
@@ -61,18 +63,33 @@ class VLLMClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        try:
-            resp = httpx.post(
-                f"{self._base}/chat/completions",
-                headers=self._headers,
-                json=payload,
-                timeout=self._timeout,
-                trust_env=False,
-            )
-            resp.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise VLLMError(f"vLLM chat completion failed: {exc}") from exc
-        choices = resp.json().get("choices", [])
-        if not choices:
-            raise VLLMError("vLLM returned no choices")
-        return choices[0]["message"]["content"]
+        # Rate-limited endpoints (AMD Token Factory: 30 RPM per key)
+        # answer bursts with 429. Honour Retry-After when sent, else
+        # back off briefly; three retries, then the error stands.
+        delays = [2.0, 5.0, 12.0]
+        for attempt in range(len(delays) + 1):
+            try:
+                resp = httpx.post(
+                    f"{self._base}/chat/completions",
+                    headers=self._headers,
+                    json=payload,
+                    timeout=self._timeout,
+                    trust_env=False,
+                )
+                if resp.status_code in (429, 503) and attempt < len(delays):
+                    retry_after = resp.headers.get("Retry-After", "")
+                    delay = (
+                        float(retry_after)
+                        if retry_after.replace(".", "", 1).isdigit()
+                        else delays[attempt]
+                    )
+                    time.sleep(min(delay, 20.0))
+                    continue
+                resp.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise VLLMError(f"vLLM chat completion failed: {exc}") from exc
+            choices = resp.json().get("choices", [])
+            if not choices:
+                raise VLLMError("vLLM returned no choices")
+            return choices[0]["message"]["content"]
+        raise VLLMError("vLLM chat completion failed: rate limited, retries exhausted")

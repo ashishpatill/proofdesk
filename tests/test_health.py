@@ -14,3 +14,21 @@ def test_health_shape_without_vllm():
     assert body["status"] == "ok"
     assert body["vllm"]["reachable"] is False
     assert body["vllm"]["models"] == []
+
+
+def test_index_serves_ui():
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "ProofDesk" in resp.text
+    assert "checked against the source" in resp.text
+
+
+def test_sample_endpoint_shape():
+    resp = client.get("/sample")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) >= 10
+    first = items[0]
+    assert first["question"]
+    assert first["passages"] and first["passages"][0]["source"].endswith(".md")
+    assert "expected" not in first

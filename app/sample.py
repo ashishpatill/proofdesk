@@ -1,0 +1,49 @@
+"""Sample pack access: the fictional KiteMetric documents and the
+labelled questionnaire, shared by the demo UI and the eval harness.
+
+Passages are paragraphs of the sample documents. A question with a
+source_doc draws its passages from that document; the rest draw from
+the whole library, the way a real desk would search everything it
+holds.
+"""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from app.answers import QuestionItem
+from app.drafting import Passage
+
+SAMPLE_DIR = Path(__file__).resolve().parent.parent / "data" / "sample"
+
+
+def load_passages(sample_dir: Path = SAMPLE_DIR) -> dict[str, list[Passage]]:
+    per_doc: dict[str, list[Passage]] = {}
+    for path in sorted(sample_dir.glob("*.md")):
+        passages = []
+        for i, chunk in enumerate(path.read_text().split("\n\n")):
+            text = " ".join(chunk.split())
+            if len(text) >= 40 and not text.startswith("#"):
+                passages.append(
+                    Passage(id=f"{path.stem}-{i}", source=path.name, text=text)
+                )
+        per_doc[path.name] = passages
+    return per_doc
+
+
+def load_pack(sample_dir: Path = SAMPLE_DIR) -> dict:
+    return json.loads((sample_dir / "questionnaire.json").read_text())
+
+
+def sample_items(sample_dir: Path = SAMPLE_DIR) -> list[QuestionItem]:
+    pack = load_pack(sample_dir)
+    per_doc = load_passages(sample_dir)
+    items = []
+    for q in pack["questions"]:
+        if q.get("source_doc") in per_doc:
+            passages = per_doc[q["source_doc"]]
+        else:
+            passages = [p for docs in per_doc.values() for p in docs]
+        items.append(QuestionItem(question=q["question"], passages=passages))
+    return items

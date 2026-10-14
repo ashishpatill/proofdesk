@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ProofDesk — Questionnaire answers, checked against the source</title>
+<meta name="description" content="ProofDesk drafts answers to security and compliance questionnaires from a company's own documents, then checks every claim against its source before anything ships.">
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --ink:#0b1220; --mut:#5b6474; --line:#e6e8ee; --acc:#4f46e5; }
+  * { font-family:'Inter',system-ui,-apple-system,sans-serif; }
+  .mono { font-family:'JetBrains Mono',ui-monospace,monospace; }
+  body { background:#f6f7f9; color:var(--ink); -webkit-font-smoothing:antialiased; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:16px;
+          box-shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.03); }
+  .pill { display:inline-flex; align-items:center; gap:5px; font-size:11px; font-weight:600;
+          padding:3px 9px; border-radius:999px; letter-spacing:.01em; white-space:nowrap; }
+  .pill-green { background:#ecfdf3; color:#067647; border:1px solid #a6f4c5; }
+  .pill-amber { background:#fffaeb; color:#b54708; border:1px solid #fedf89; }
+  .pill-slate { background:#f2f4f7; color:#475467; border:1px solid #e4e7ec; }
+  .pill-red   { background:#fef3f2; color:#b42318; border:1px solid #fecdca; }
+  .pill-indigo{ background:#eef2ff; color:#3538cd; border:1px solid #d1d5ff; }
+  .dot { width:7px; height:7px; border-radius:99px; }
+  .dot-live { background:#12b76a; box-shadow:0 0 0 3px rgba(18,183,106,.18); }
+  .dot-down { background:#f04438; box-shadow:0 0 0 3px rgba(240,68,56,.15); }
+  .btn-primary { background:var(--acc); color:#fff; font-weight:600; border-radius:10px;
+                 padding:10px 18px; transition:.15s; box-shadow:0 1px 2px rgba(79,70,229,.35); }
+  .btn-primary:hover:not(:disabled){ background:#4338ca; }
+  .btn-primary:disabled{ opacity:.55; cursor:not-allowed; }
+  .btn-ghost { border:1px solid var(--line); background:#fff; font-weight:600; border-radius:10px;
+               padding:10px 16px; transition:.15s; }
+  .btn-ghost:hover{ border-color:#c9cedb; background:#fafbfc; }
+  .meter { height:6px; border-radius:99px; background:#eef0f4; overflow:hidden; }
+  .meter > div { height:100%; border-radius:99px; }
+  .fade-in { animation:fade .45s ease both; }
+  @keyframes fade { from{opacity:0; transform:translateY(6px)} to{opacity:1; transform:none} }
+  .spin { width:16px;height:16px;border-radius:50%;border:2px solid rgba(255,255,255,.4);
+          border-top-color:#fff; animation:sp 0.7s linear infinite; display:inline-block; }
+  @keyframes sp { to { transform:rotate(360deg) } }
+  .grad { background:linear-gradient(92deg,#111827 20%,#4f46e5 55%,#111827 85%);
+          -webkit-background-clip:text; background-clip:text; color:transparent; }
+  details.ev summary { cursor:pointer; list-style:none; }
+  details.ev summary::-webkit-details-marker { display:none; }
+  .toast { position:fixed; bottom:22px; left:50%; transform:translateX(-50%) translateY(20px);
+           opacity:0; transition:.25s; z-index:50; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- ══════════ Nav ══════════ -->
+<header class="sticky top-0 z-40 bg-white/85 backdrop-blur border-b" style="border-color:var(--line)">
+  <div class="max-w-6xl mx-auto px-5 h-16 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-[10px] flex items-center justify-center" style="background:var(--acc)">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l7 3v5c0 4.5-3 8.1-7 10-4-1.9-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/></svg>
+      </div>
+      <div class="leading-tight">
+        <div class="font-bold text-[17px] tracking-tight">ProofDesk</div>
+        <div class="text-[11px] font-medium" style="color:var(--mut)">by BIMLabz</div>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <span id="health-pill" class="pill pill-slate"><span class="dot dot-down" id="health-dot"></span><span id="health-text">Checking models…</span></span>
+      <a href="https://github.com/ashishpatill/proofdesk" target="_blank" rel="noopener" class="btn-ghost !py-2 text-sm hidden sm:block">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- ══════════ Hero ══════════ -->
+<section class="max-w-6xl mx-auto px-5 pt-12 pb-8">
+  <div class="max-w-3xl">
+    <span class="pill pill-indigo mb-4">Security questionnaires · Claim-checked by design</span>
+    <h1 class="text-4xl sm:text-5xl font-extrabold tracking-tight leading-[1.08]">
+      Questionnaire answers,<br><span class="grad">checked against the source.</span>
+    </h1>
+    <p class="mt-5 text-[17px] leading-relaxed" style="color:var(--mut)">
+      ProofDesk drafts answers from your company's own documents, then checks
+      <strong class="text-slate-800">every claim</strong> against the passage it cites before anything ships.
+      Unsupported claims are cut. Uncertain ones go to a human. Nothing is guessed.
+    </p>
+    <div class="mt-6 flex flex-wrap gap-2 text-[12.5px]">
+      <span class="pill pill-slate mono" id="chip-drafter">Drafter · —</span>
+      <span class="pill pill-slate mono" id="chip-checker">Checker · —</span>
+      <span class="pill pill-slate mono" id="chip-decision">Decision layer · —</span>
+      <span class="pill pill-slate">Served on AMD Token Factory</span>
+    </div>
+  </div>
+
+  <!-- How it works -->
+  <div class="grid sm:grid-cols-4 gap-3 mt-10 text-[13px]">
+    <div class="card p-4"><div class="font-bold mb-1">1 · Triage</div><p style="color:var(--mut)">Each question is classified and scored for sensitivity and answerability.</p></div>
+    <div class="card p-4"><div class="font-bold mb-1">2 · Draft</div><p style="color:var(--mut)">The drafter writes only from your documents, with a citation on every claim.</p></div>
+    <div class="card p-4"><div class="font-bold mb-1">3 · Check</div><p style="color:var(--mut)">Claims scoring ≥ 0.80 ship, ≤ 0.30 are cut, the rest escalate to the checker model.</p></div>
+    <div class="card p-4"><div class="font-bold mb-1">4 · Review</div><p style="color:var(--mut)">Anything unsettled lands in a human review queue with the full evidence trail.</p></div>
+  </div>
+</section>
+
+<!-- ══════════ App ══════════ -->
+<main class="max-w-6xl mx-auto px-5 pb-16 grid lg:grid-cols-[380px_1fr] gap-5 items-start">
+
+  <!-- Left: run panel -->
+  <section class="card p-5 lg:sticky lg:top-24">
+    <div class="flex items-center justify-between">
+      <h2 class="font-bold text-[15px]">Sample questionnaire</h2>
+      <span class="pill pill-slate" id="q-count">Loading…</span>
+    </div>
+    <p class="text-[13px] mt-1.5 leading-relaxed" style="color:var(--mut)">
+      Fictional company <strong class="text-slate-700">KiteMetric</strong> — 8 policy documents,
+      one questionnaire. Includes questions the documents cannot answer, and one trap.
+    </p>
+    <ol id="q-list" class="mt-4 space-y-2 text-[13px] leading-snug"></ol>
+    <button id="run-btn" class="btn-primary w-full mt-5 flex items-center justify-center gap-2" disabled>
+      Run ProofDesk
+    </button>
+    <div id="run-status" class="text-[12.5px] mt-3 text-center hidden" style="color:var(--mut)"></div>
+    <div class="border-t mt-5 pt-4" style="border-color:var(--line)">
+      <div class="font-semibold text-[13px] mb-1">Continue in Evolus</div>
+      <p class="text-[12.5px] leading-relaxed" style="color:var(--mut)">Send the finished answer sheet into the Evolus workflow, where the business process continues.</p>
+      <button id="dispatch-btn" class="btn-ghost w-full mt-3 text-sm" disabled>Dispatch to Evolus</button>
+    </div>
+  </section>
+
+  <!-- Right: results -->
+  <section id="results" class="min-w-0">
+    <div id="empty-state" class="card p-10 text-center">
+      <div class="w-12 h-12 mx-auto rounded-2xl flex items-center justify-center" style="background:#eef2ff">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#4f46e5" stroke-width="2" stroke-linecap="round"><path d="M9 12h6M9 16h4M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z"/><path d="M14 3v5h5"/></svg>
+      </div>
+      <h3 class="font-bold mt-4">No run yet</h3>
+      <p class="text-sm mt-1 max-w-sm mx-auto" style="color:var(--mut)">Run the sample questionnaire and watch each answer get drafted, checked claim by claim, and either shipped, cut, or handed to a human.</p>
+    </div>
+    <div id="sheet" class="hidden">
+      <div id="stat-row" class="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5"></div>
+      <div id="entries" class="space-y-4"></div>
+      <div id="review-block" class="mt-8 hidden">
+        <h3 class="font-bold text-[15px] mb-3">Human review queue</h3>
+        <div id="review-list" class="space-y-3"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="border-t" style="border-color:var(--line)">
+  <div class="max-w-6xl mx-auto px-5 py-8 flex flex-col sm:flex-row gap-3 items-center justify-between text-[12.5px]" style="color:var(--mut)">
+    <span>ProofDesk · AMD Developer Hackathon Act III · Team BIMLabz</span>
+    <span class="mono">DeepSeek-V4.1-Flash · Qwen3.8-27B · AMD Token Factory · Evolus</span>
+  </div>
+</footer>
+
+<div id="toast" class="toast card px-4 py-3 text-sm font-medium shadow-lg"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let samplePayload = null, hasSheet = false, timer = null;
+
+function toast(msg, ok=true){
+  const t = $('#toast'); t.textContent = msg;
+  t.style.borderColor = ok ? '#a6f4c5' : '#fecdca';
+  t.classList.add('show'); setTimeout(()=>t.classList.remove('show'), 4200);
+}
+function esc(s){ const d=document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+function pillFor(status){
+  if(status==='answered') return '<span class="pill pill-green">Answered</span>';
+  if(status==='partial')  return '<span class="pill pill-amber">Partial</span>';
+  return '<span class="pill pill-slate">Hand-off</span>';
+}
+function verdictPill(v){
+  if(v==='supported')   return '<span class="pill pill-green">Supported</span>';
+  if(v==='unsupported') return '<span class="pill pill-red">Unsupported</span>';
+  return '<span class="pill pill-amber">Uncertain</span>';
+}
+
+async function loadHealth(){
+  try{
+    const h = await (await fetch('/health')).json();
+    const live = h.vllm && h.vllm.reachable;
+    $('#health-dot').className = 'dot ' + (live ? 'dot-live' : 'dot-down');
+    $('#health-text').textContent = live ? 'Models live' : 'Models unreachable';
+    $('#chip-drafter').textContent  = 'Drafter · ' + h.drafter_model;
+    $('#chip-checker').textContent  = 'Checker · ' + h.checker_model;
+    $('#chip-decision').textContent = 'Decision layer · ' + h.decision_model;
+  }catch(e){ $('#health-text').textContent = 'Status unknown'; }
+}
+
+async function loadSample(){
+  try{
+    samplePayload = await (await fetch('/sample')).json();
+    $('#q-count').textContent = samplePayload.items.length + ' questions';
+    $('#q-list').innerHTML = samplePayload.items.map((it,i)=>
+      `<li class="flex gap-2.5"><span class="mono text-[11px] mt-[1px] shrink-0" style="color:var(--mut)">${String(i+1).padStart(2,'0')}</span><span>${esc(it.question)}</span></li>`).join('');
+    $('#run-btn').disabled = false;
+  }catch(e){ $('#q-count').textContent = 'Failed to load'; }
+}
+
+function statCard(label, value, sub){
+  return `<div class="card p-4 fade-in"><div class="text-[26px] font-extrabold tracking-tight">${value}</div>
+          <div class="text-[12px] font-semibold mt-0.5">${label}</div>
+          <div class="text-[11.5px]" style="color:var(--mut)">${sub}</div></div>`;
+}
+
+function evidenceRow(ev){
+  const pct = ev.precheck_probability == null ? null : Math.round(ev.precheck_probability*100);
+  const barColor = ev.verdict==='supported' ? '#12b76a' : ev.verdict==='unsupported' ? '#f04438' : '#f79009';
+  return `<div class="py-2.5 border-t first:border-t-0" style="border-color:var(--line)">
+    <div class="flex items-start justify-between gap-3">
+      <p class="text-[13px] leading-snug">${esc(ev.claim)}</p>${verdictPill(ev.verdict)}
+    </div>
+    <div class="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1.5 text-[11.5px]" style="color:var(--mut)">
+      <span>Checked by <span class="mono">${esc(ev.checked_by)}</span></span>
+      ${ev.sources && ev.sources.length ? `<span>Source · ${ev.sources.map(esc).join(', ')}</span>` : ''}
+      ${pct !== null ? `<span class="flex items-center gap-2">Pre-check ${pct}%
+        <span class="meter w-20 inline-block"><div style="width:${pct}%;background:${barColor}"></div></span></span>` : ''}
+    </div>
+    ${ev.reason ? `<p class="text-[12px] mt-1" style="color:var(--mut)">${esc(ev.reason)}</p>` : ''}
+  </div>`;
+}
+
+function renderSheet(sheet){
+  hasSheet = true;
+  $('#empty-state').classList.add('hidden');
+  $('#sheet').classList.remove('hidden');
+  const c = sheet.counts || {};
+  const verdicts = sheet.entries.flatMap(e=>e.evidence_trail);
+  const shipped = verdicts.filter(v=>v.verdict==='supported').length;
+  const blocked = verdicts.filter(v=>v.verdict!=='supported').length;
+  $('#stat-row').innerHTML =
+    statCard('Answered', c.answered ?? 0, (c.partial ?? 0) + ' partial · ' + (c.handoff ?? 0) + ' hand-offs') +
+    statCard('Claims shipped', shipped, 'every one source-checked') +
+    statCard('Claims blocked', blocked, 'unsupported or uncertain') +
+    statCard('Questions', sheet.entries.length, 'KiteMetric sample pack');
+  $('#entries').innerHTML = sheet.entries.map((e,i)=>`
+    <article class="card p-5 fade-in" style="animation-delay:${i*40}ms">
+      <div class="flex items-start justify-between gap-3">
+        <h3 class="font-semibold text-[15px] leading-snug">${esc(e.question)}</h3>${pillFor(e.status)}
+      </div>
+      ${e.shipped_answer
+        ? `<div class="mt-3 text-[14px] leading-relaxed bg-slate-50 border rounded-xl px-4 py-3" style="border-color:var(--line)">${esc(e.shipped_answer)}</div>`
+        : `<p class="mt-3 text-[13.5px]" style="color:var(--mut)">No answer shipped — the documents do not settle this question, so it is handed to a human instead of being guessed.</p>`}
+      ${e.flags && e.flags.length ? `<div class="mt-2.5 flex flex-wrap gap-1.5">${e.flags.map(f=>`<span class="pill pill-amber">${esc(f)}</span>`).join('')}</div>` : ''}
+      <details class="ev mt-3">
+        <summary class="text-[12.5px] font-semibold" style="color:var(--acc)">Evidence trail · ${e.evidence_trail.length} claim${e.evidence_trail.length===1?'':'s'} checked</summary>
+        <div class="mt-1">${e.evidence_trail.map(evidenceRow).join('') || '<p class="text-[12.5px] py-2" style="color:var(--mut)">No claims were drafted for this question.</p>'}</div>
+      </details>
+    </article>`).join('');
+  $('#dispatch-btn').disabled = false;
+  loadReview();
+}
+
+async function loadReview(){
+  try{
+    const items = await (await fetch('/review-queue')).json();
+    if(!items.length){ $('#review-block').classList.add('hidden'); return; }
+    $('#review-block').classList.remove('hidden');
+    $('#review-list').innerHTML = items.map(it=>`
+      <div class="card p-4 border-l-4" style="border-left-color:#f79009">
+        <div class="font-semibold text-[13.5px]">${esc(it.question)}</div>
+        <ul class="text-[12.5px] mt-1 list-disc pl-4" style="color:var(--mut)">
+          ${it.reasons.map(r=>`<li>${esc(r)}</li>`).join('')}
+        </ul>
+      </div>`).join('');
+  }catch(e){ /* review queue is best-effort */ }
+}
+
+async function run(){
+  const btn = $('#run-btn'), status = $('#run-status');
+  btn.disabled = true; status.classList.remove('hidden');
+  const t0 = Date.now();
+  const total = samplePayload.items.length;
+  btn.innerHTML = '<span class="spin"></span> Running…';
+  let failed = 0;
+  // Questions run one at a time: progress is visible per question,
+  // and no single request has to outlive a hosting time limit. The
+  // server appends each result to the stored answer sheet.
+  for(let i = 0; i < total; i++){
+    status.textContent = 'Question ' + (i+1) + ' of ' + total +
+      ' — drafting, then checking every claim… · ' + Math.round((Date.now()-t0)/1000) + 's';
+    try{
+      const resp = await fetch('/questionnaire' + (i ? '?append=true' : ''), { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ items: [samplePayload.items[i]] }) });
+      if(!resp.ok) throw new Error('run failed (' + resp.status + ')');
+      renderSheet(await resp.json());
+    }catch(e){ failed++; }
+  }
+  status.classList.add('hidden');
+  btn.disabled = false; btn.textContent = 'Run ProofDesk again';
+  if(failed) toast(failed + ' question(s) could not be processed — the model endpoint may be rate-limited. Run again to retry.', false);
+  else toast('Answer sheet ready — every claim checked.');
+}
+
+async function dispatch(){
+  const btn = $('#dispatch-btn'); btn.disabled = true; btn.textContent = 'Dispatching…';
+  try{
+    const resp = await fetch('/evolus/dispatch', { method:'POST' });
+    const data = await resp.json().catch(()=>({}));
+    if(resp.ok){ toast('Answer sheet dispatched to the Evolus workflow.'); }
+    else if(resp.status === 503){ toast('Evolus is not configured on this deployment yet.', false); }
+    else { toast('Evolus dispatch failed: ' + (data.detail || resp.status), false); }
+  }catch(e){ toast('Evolus dispatch failed.', false); }
+  btn.disabled = !hasSheet; btn.textContent = 'Dispatch to Evolus';
+}
+
+$('#run-btn').addEventListener('click', run);
+$('#dispatch-btn').addEventListener('click', dispatch);
+loadHealth(); loadSample();
+</script>
+</body>
+</html>

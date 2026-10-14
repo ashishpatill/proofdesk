@@ -20,8 +20,13 @@ Commit 8: Evolus dispatch endpoint sends the finished sheet to the
 configured Evolus workflow through the Evolus REST API.
 """
 
+from pathlib import Path
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
+
+_STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 from app.answers import (
     AnswerSheet,
@@ -41,6 +46,7 @@ from app.drafting import (
     drafting_service_from_settings,
 )
 from app.evolus import EvolusError, evolus_client_from_settings
+from app.sample import sample_items
 from app.vllm_client import VLLMClient, VLLMError
 
 settings = load_settings()
@@ -81,6 +87,11 @@ class DraftOut(BaseModel):
     answer: str
     claims: list[ClaimOut]
     model: str
+
+
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(_STATIC_DIR / "index.html")
 
 
 @app.get("/health")
@@ -282,8 +293,34 @@ def _stored_sheet() -> AnswerSheet:
     return sheet
 
 
+@app.get("/sample", response_model=QuestionnaireRequest)
+def sample() -> QuestionnaireRequest:
+    """The demo pack (fictional KiteMetric): the labelled sample
+    questionnaire with its document passages, ready to POST back to
+    /questionnaire. Expected labels stay server-side."""
+    return QuestionnaireRequest(
+        items=[
+            QuestionnaireItemIn(
+                question=item.question,
+                passages=[
+                    PassageIn(id=p.id, source=p.source, text=p.text)
+                    for p in item.passages
+                ],
+            )
+            for item in sample_items()
+        ]
+    )
+
+
 @app.post("/questionnaire", response_model=AnswerSheetOut)
-def questionnaire(request: QuestionnaireRequest) -> AnswerSheetOut:
+def questionnaire(
+    request: QuestionnaireRequest, append: bool = False
+) -> AnswerSheetOut:
+    """Build the answer sheet for the given questions. With
+    ?append=true the new entries extend the stored sheet instead of
+    replacing it, so a client can run questions one at a time (the
+    demo UI does this: progress per question, and no single request
+    has to outlive a serverless time limit)."""
     service = AnswerSheetService(
         drafting=drafting_service_from_settings(settings),
         checker=claim_checker_from_settings(settings),
@@ -302,6 +339,10 @@ def questionnaire(request: QuestionnaireRequest) -> AnswerSheetOut:
         sheet = service.build(items)
     except (DraftingError, VLLMError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if append:
+        existing = getattr(app.state, "answer_sheet", None)
+        if existing is not None:
+            sheet = AnswerSheet(entries=[*existing.entries, *sheet.entries])
     app.state.answer_sheet = sheet
     return _sheet_out(sheet)
 

@@ -31,33 +31,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from app.answers import AnswerSheetService, QuestionItem  # noqa: E402
+from app.answers import AnswerSheetService  # noqa: E402
 from app.checking import claim_checker_from_settings  # noqa: E402
 from app.config import load_settings  # noqa: E402
-from app.drafting import Passage, drafting_service_from_settings  # noqa: E402
+from app.drafting import drafting_service_from_settings  # noqa: E402
+from app.sample import load_pack, sample_items  # noqa: E402
 
 SAMPLE = ROOT / "data" / "sample"
-
-
-def load_passages() -> dict[str, list[Passage]]:
-    """Paragraph passages per sample document."""
-    per_doc: dict[str, list[Passage]] = {}
-    for path in sorted(SAMPLE.glob("*.md")):
-        passages = []
-        for i, chunk in enumerate(path.read_text().split("\n\n")):
-            text = " ".join(chunk.split())
-            if len(text) >= 40 and not text.startswith("#"):
-                passages.append(
-                    Passage(id=f"{path.stem}-{i}", source=path.name, text=text)
-                )
-        per_doc[path.name] = passages
-    return per_doc
-
-
-def question_passages(q: dict, per_doc: dict[str, list[Passage]]) -> list[Passage]:
-    if q.get("source_doc") in per_doc:
-        return per_doc[q["source_doc"]]
-    return [p for passages in per_doc.values() for p in passages]
 
 
 def score(q: dict, entry) -> tuple[bool, str]:
@@ -81,12 +61,8 @@ def main() -> int:
     args = parser.parse_args()
 
     settings = load_settings()
-    pack = json.loads((SAMPLE / "questionnaire.json").read_text())
-    per_doc = load_passages()
-    items = [
-        QuestionItem(question=q["question"], passages=question_passages(q, per_doc))
-        for q in pack["questions"]
-    ]
+    pack = load_pack()
+    items = sample_items()
     service = AnswerSheetService(
         drafting=drafting_service_from_settings(settings),
         checker=claim_checker_from_settings(settings),
