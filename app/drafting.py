@@ -37,7 +37,11 @@ _SYSTEM_PROMPT = (
     "documents do not mention X' or 'no other option is published') "
     "is not an answer and must never be drafted: absence in the "
     "passages means the question is unanswered, so return empty "
-    "claims unless a passage states the fact affirmatively."
+    "claims unless a passage states the fact affirmatively. "
+    "For a yes/no question about whether something is offered, "
+    "supported, or available, answer only when a passage explicitly "
+    "confirms or denies it; describing the standard offering does "
+    "not count as a denial."
 )
 
 
