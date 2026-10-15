@@ -50,6 +50,51 @@ def test_chat_retries_on_429_then_succeeds(monkeypatch):
     assert calls["n"] == 3
 
 
+_USAGE_PAYLOAD = {
+    "rpm_limit": 20,
+    "daily_cost_limit_usd": 1,
+    "daily_cost_used_usd": 0.25,
+    "daily_cost_remaining_usd": 0.75,
+    "daily_reset_at": "2026-10-15T16:00:00.000Z",
+}
+
+
+def test_usage_parses_token_factory_payload(monkeypatch):
+    monkeypatch.setattr(
+        "app.vllm_client.httpx.get",
+        lambda *a, **k: _Resp(200, _USAGE_PAYLOAD),
+    )
+    usage = make_client().usage()
+    assert usage["remaining_usd"] == 0.75
+    assert usage["limit_usd"] == 1.0
+    assert usage["rpm_limit"] == 20
+    assert usage["reset_at"].startswith("2026-10-15T16:00")
+
+
+def test_usage_raises_on_http_error(monkeypatch):
+    monkeypatch.setattr(
+        "app.vllm_client.httpx.get", lambda *a, **k: _Resp(404, {})
+    )
+    try:
+        make_client().usage()
+    except Exception as exc:
+        assert "usage" in str(exc)
+    else:
+        raise AssertionError("usage() must raise when the endpoint errors")
+
+
+def test_usage_raises_on_malformed_payload(monkeypatch):
+    monkeypatch.setattr(
+        "app.vllm_client.httpx.get", lambda *a, **k: _Resp(200, {"nope": 1})
+    )
+    try:
+        make_client().usage()
+    except Exception:
+        pass
+    else:
+        raise AssertionError("usage() must raise on a malformed payload")
+
+
 def test_chat_retries_on_timeout_then_succeeds(monkeypatch):
     calls = {"n": 0}
     ok = _Resp(200, {"choices": [{"message": {"content": "done"}}]})

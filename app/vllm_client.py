@@ -50,6 +50,33 @@ class VLLMClient:
             return {"reachable": False, "models": [], "error": str(exc)}
         return {"reachable": True, "models": models, "error": None}
 
+    def usage(self) -> dict:
+        """Daily quota state, for endpoints that report it (AMD
+        Token Factory serves /usage next to /models: a daily cost
+        budget with a reset time). Returns the fields the UI needs;
+        raises VLLMError anywhere else, where no quota applies."""
+        try:
+            resp = httpx.get(
+                f"{self._base}/usage",
+                headers=self._headers,
+                timeout=self._timeout,
+                trust_env=False,
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise VLLMError(f"vLLM usage fetch failed: {exc}") from exc
+        data = resp.json()
+        try:
+            return {
+                "limit_usd": float(data["daily_cost_limit_usd"]),
+                "used_usd": float(data["daily_cost_used_usd"]),
+                "remaining_usd": float(data["daily_cost_remaining_usd"]),
+                "rpm_limit": int(data["rpm_limit"]),
+                "reset_at": str(data["daily_reset_at"]),
+            }
+        except (KeyError, TypeError, ValueError) as exc:
+            raise VLLMError(f"vLLM usage payload malformed: {exc}") from exc
+
     def chat(
         self,
         model: str,

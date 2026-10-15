@@ -14,6 +14,9 @@ def test_health_shape_without_vllm():
     assert body["status"] == "ok"
     assert body["vllm"]["reachable"] is False
     assert body["vllm"]["models"] == []
+    # Quota is reported when the endpoint serves usage data; with no
+    # server at all it stays null and health still answers.
+    assert body["quota"] is None
 
 
 def test_index_serves_ui():

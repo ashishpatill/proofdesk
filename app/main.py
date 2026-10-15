@@ -96,13 +96,24 @@ def index():
 
 @app.get("/health")
 def health() -> dict:
-    probe = VLLMClient(settings, timeout=3.0).probe()
+    client = VLLMClient(settings, timeout=3.0)
+    probe = client.probe()
+    # Quota is advisory: endpoints that report usage (Token Factory)
+    # fill it in, everywhere else it stays null and nothing locks.
+    # A failed usage fetch must never fail the health check itself.
+    quota = None
+    if probe["reachable"]:
+        try:
+            quota = client.usage()
+        except VLLMError:
+            quota = None
     return {
         "status": "ok",
         "drafter_model": settings.drafter_model,
         "checker_model": settings.checker_model,
         "decision_model": settings.decision_model,
         "vllm": probe,
+        "quota": quota,
     }
 
 

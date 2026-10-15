@@ -173,12 +173,38 @@ function verdictPill(v){
   return '<span class="pill pill-amber">Uncertain</span>';
 }
 
+const quotaLock = { locked:false, note:'' };
+const QUOTA_LOCK_USD = 0.10; // lock runs when under 10% of the daily budget remains
+
+function applyQuotaLock(){
+  if (!quotaLock.locked) return;
+  $('#run-btn').disabled = true;
+  const st = $('#run-status');
+  st.textContent = quotaLock.note;
+  st.classList.remove('hidden');
+}
+
 async function loadHealth(){
   try{
     const h = await (await fetch('/health')).json();
     const live = h.vllm && h.vllm.reachable;
     $('#health-dot').className = 'dot ' + (live ? 'dot-live' : 'dot-down');
     $('#health-text').textContent = live ? 'Models live' : 'Models unreachable';
+    if (live && h.quota){
+      const resets = new Date(h.quota.reset_at)
+        .toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+      if (h.quota.remaining_usd < QUOTA_LOCK_USD){
+        quotaLock.locked = true;
+        quotaLock.note = 'Daily model budget is nearly used up. Runs unlock when it resets at ' + resets + '.';
+        $('#health-dot').className = 'dot dot-down';
+        $('#health-text').textContent = 'Daily budget used up · resets ' + resets;
+        applyQuotaLock();
+      } else {
+        $('#health-text').textContent =
+          'Models live · $' + h.quota.remaining_usd.toFixed(2) + ' of $' +
+          h.quota.limit_usd.toFixed(2) + ' left today';
+      }
+    }
     $('#chip-drafter').textContent  = 'Drafter · ' + h.drafter_model;
     $('#chip-checker').textContent  = 'Checker · ' + h.checker_model;
     $('#chip-decision').textContent = 'Decision layer · ' + h.decision_model;
@@ -191,7 +217,8 @@ async function loadSample(){
     $('#q-count').textContent = samplePayload.items.length + ' questions';
     $('#q-list').innerHTML = samplePayload.items.map((it,i)=>
       `<li class="flex gap-2.5"><span class="mono text-[11px] mt-[1px] shrink-0" style="color:var(--mut)">${String(i+1).padStart(2,'0')}</span><span>${esc(it.question)}</span></li>`).join('');
-    $('#run-btn').disabled = false;
+    $('#run-btn').disabled = quotaLock.locked;
+    applyQuotaLock();
   }catch(e){ $('#q-count').textContent = 'Failed to load'; }
 }
 
