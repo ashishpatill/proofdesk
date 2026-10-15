@@ -1,0 +1,27 @@
+# MLX-LM LoRA config for the ProofDesk claim-support fine-tune.
+# Base: Qwen/Qwen3.5-0.8B — the same base as vllm-sr/d3-lite.
+model: "Qwen/Qwen3.5-0.8B"
+train: true
+data: "finetune/data"
+seed: 20261015
+# LoRA
+fine_tune_type: "lora"
+num_layers: 16
+lora_parameters:
+  rank: 16
+  scale: 20.0
+  dropout: 0.0
+# Optimisation
+optimizer: "adamw"
+learning_rate: 1.0e-5
+iters: 700
+batch_size: 4
+grad_accumulation_steps: 2
+max_seq_length: 1024
+# Reporting / saving
+report_to: null
+save_every: 350
+steps_per_report: 50
+steps_per_eval: 175
+adapter_path: "finetune/adapters"
+test: false
