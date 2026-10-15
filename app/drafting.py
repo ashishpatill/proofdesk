@@ -99,7 +99,7 @@ class DraftingService:
             raw = self._client.chat(
                 self._model,
                 build_messages(question, passages),
-                temperature=0.2,
+                temperature=0.0,
                 max_tokens=1024,
             )
         except VLLMError as exc:
