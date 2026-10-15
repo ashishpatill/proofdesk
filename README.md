@@ -10,22 +10,27 @@ with an evidence trail: an AI auditor standing over the drafting
 agent.
 
 Built for the AMD Developer Hackathon: ACT III (Evolus Business
-Agents track). All model inference runs on AMD Instinct MI300X
-hardware on AMD Developer Cloud.
+Agents track). All model inference runs on open models served by
+AMD Token Factory, AMD's hosted serving for the event: no billing,
+a daily usage cap, OpenAI-compatible API.
 
 ## Architecture
 
-- Evolus: knowledge library holding the company documents, plus a
-  workflow running the pipeline (at least two building blocks).
-- This app (containerised): intake, triage, retrieval, drafting,
-  claim splitting, claim checking, answer sheet rendering, and a
-  human review queue for flagged items.
-- Models, served on one MI300X droplet:
-  - Qwen2.5-14B-Instruct (vLLM): the drafter.
-  - Qwen2.5-32B-Instruct (vLLM): the checker of last resort for
-    escalated claims.
-  - vllm-sr d3-lite (0.85B): the decision layer for triage and
-    claim-support pre-checks, served beside vLLM.
+- Evolus: a workflow ("ProofDesk Answer Sheet Intake") that receives
+  the finished answer sheet through the Evolus API and continues the
+  business process, plus a knowledge library holding the company
+  documents.
+- This app (containerised FastAPI, also deployed on Vercel): intake,
+  triage, drafting, claim splitting, claim checking, answer sheet
+  rendering, and a human review queue for flagged items. The demo UI
+  runs questions through a paced parallel runner (three in flight,
+  pause/stop, duplicate-run guard) that respects the endpoint's
+  20-requests-per-minute limit, and shows the remaining daily budget.
+- Models, served by AMD Token Factory:
+  - DeepSeek-V4.1-Flash: the drafter, and the decision layer for
+    triage and claim-support pre-checks (0.80/0.30 routing bands).
+  - Qwen3.8-27B: the checker of last resort for escalated claims —
+    a different model family from the drafter, on purpose.
 
 ## Run locally
 
@@ -35,7 +40,19 @@ docker compose up --build
 curl http://localhost:8000/health
 ```
 
+## Eval
+
+On the labelled 15-question sample pack (11 answerable, 3 the
+documents cannot answer, 1 trap — an ISO 27001 question where the
+documents support SOC 2 only): **14/15**, the trap blocked, and zero
+unsupported claims shipped. Full table: eval/results.md.
+
 ## Status
 
-Build in progress during the hackathon window (Oct 12-18, 2026).
-Progress and eval numbers land in this README as they are measured.
+Live demo: https://proofdesk-nine.vercel.app — health endpoint
+reports the models reachable and the remaining daily budget.
+
+A fine-tune of the decision layer (LoRA on Qwen3.5-0.8B, the d3-lite
+base, trained on the Mac) is in progress under finetune/ with a
+ship-only-if-it-beats-the-baseline gate; the shipped build above
+does not depend on it.
