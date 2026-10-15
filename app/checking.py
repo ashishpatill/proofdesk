@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from app.decision import ClaimSupportService
@@ -149,7 +150,21 @@ class ClaimChecker:
         self, draft: DraftResult, passages: list[Passage]
     ) -> CheckedDraft:
         by_id = {p.id: p for p in passages}
-        verdicts = [self._check_claim(c, by_id, passages) for c in draft.claims]
+        # Claims are independent of each other, so check them
+        # concurrently (bounded): on a slow shared endpoint a purely
+        # sequential pass can outlive a serverless time limit, while
+        # the verdicts themselves are unchanged. executor.map keeps
+        # the results in claim order.
+        if len(draft.claims) > 1:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                verdicts = list(
+                    pool.map(
+                        lambda c: self._check_claim(c, by_id, passages),
+                        draft.claims,
+                    )
+                )
+        else:
+            verdicts = [self._check_claim(c, by_id, passages) for c in draft.claims]
         return CheckedDraft(question=draft.question, verdicts=verdicts)
 
     def _check_claim(
