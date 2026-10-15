@@ -29,7 +29,9 @@ from pydantic import BaseModel
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 from app.answers import (
+    AnswerEntry,
     AnswerSheet,
+    EvidenceItem,
     QuestionItem,
     AnswerSheetService,
     render_markdown,
@@ -361,6 +363,44 @@ def questionnaire(
 @app.get("/answers", response_model=AnswerSheetOut)
 def answers() -> AnswerSheetOut:
     return _sheet_out(_stored_sheet())
+
+
+@app.post("/answers/sync", response_model=AnswerSheetOut)
+def answers_sync(payload: AnswerSheetOut) -> AnswerSheetOut:
+    """Store a client-assembled sheet as the current one.
+
+    The demo UI runs questions in parallel, and parallel requests
+    may land on different serverless instances, each holding only
+    the entries it built. The client merges every entry it received
+    (in question order) and syncs the complete sheet back here, so
+    the review queue and the Evolus dispatch work from the whole
+    run rather than one instance's fragment. Counts and markdown
+    in the payload are ignored; both are recomputed on return."""
+    sheet = AnswerSheet(
+        entries=[
+            AnswerEntry(
+                question=e.question,
+                status=e.status,
+                shipped_answer=e.shipped_answer,
+                evidence_trail=[
+                    EvidenceItem(
+                        claim=t.claim,
+                        verdict=t.verdict,
+                        citations=t.citations,
+                        sources=t.sources,
+                        checked_by=t.checked_by,
+                        precheck_probability=t.precheck_probability,
+                        reason=t.reason,
+                    )
+                    for t in e.evidence_trail
+                ],
+                flags=e.flags,
+            )
+            for e in payload.entries
+        ]
+    )
+    app.state.answer_sheet = sheet
+    return _sheet_out(sheet)
 
 
 class EvolusDispatchOut(BaseModel):

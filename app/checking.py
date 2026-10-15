@@ -154,9 +154,12 @@ class ClaimChecker:
         # concurrently (bounded): on a slow shared endpoint a purely
         # sequential pass can outlive a serverless time limit, while
         # the verdicts themselves are unchanged. executor.map keeps
-        # the results in claim order.
+        # the results in claim order. Two workers per question: the
+        # demo UI runs three questions at once, and the endpoint
+        # allows eight requests in flight per key, so 3 x 2 stays
+        # inside the allowance with room for the drafting calls.
         if len(draft.claims) > 1:
-            with ThreadPoolExecutor(max_workers=4) as pool:
+            with ThreadPoolExecutor(max_workers=2) as pool:
                 verdicts = list(
                     pool.map(
                         lambda c: self._check_claim(c, by_id, passages),

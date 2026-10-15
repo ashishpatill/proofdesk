@@ -114,6 +114,7 @@
     <button id="run-btn" class="btn-primary w-full mt-4 flex items-center justify-center gap-2" disabled>
       Run ProofDesk
     </button>
+    <button id="stop-btn" class="btn-ghost w-full mt-2 text-sm hidden">Stop run</button>
     <div id="run-status" class="text-[12.5px] mt-3 text-center hidden" style="color:var(--mut)"></div>
     <ol id="q-list" class="mt-4 space-y-2 text-[13px] leading-snug overflow-y-auto pr-1" style="max-height:340px"></ol>
     <div class="border-t mt-5 pt-4" style="border-color:var(--line)">
@@ -245,8 +246,8 @@ function evidenceRow(ev){
   </div>`;
 }
 
-function renderSheet(sheet){
-  hasSheet = true;
+function renderSheet(sheet, complete){
+  if (complete) hasSheet = true;
   $('#empty-state').classList.add('hidden');
   $('#sheet').classList.remove('hidden');
   const c = sheet.counts || {};
@@ -272,8 +273,7 @@ function renderSheet(sheet){
         <div class="mt-1">${e.evidence_trail.map(evidenceRow).join('') || '<p class="text-[12.5px] py-2" style="color:var(--mut)">No claims were drafted for this question.</p>'}</div>
       </details>
     </article>`).join('');
-  $('#dispatch-btn').disabled = false;
-  loadReview();
+  if (complete){ $('#dispatch-btn').disabled = false; loadReview(); }
 }
 
 async function loadReview(){
@@ -291,31 +291,150 @@ async function loadReview(){
   }catch(e){ /* review queue is best-effort */ }
 }
 
-async function run(){
-  const btn = $('#run-btn'), status = $('#run-status');
-  btn.disabled = true; status.classList.remove('hidden');
-  const t0 = Date.now();
-  const total = samplePayload.items.length;
-  btn.innerHTML = '<span class="spin"></span> Running…';
-  let failed = 0;
-  // Questions run one at a time: progress is visible per question,
-  // and no single request has to outlive a hosting time limit. The
-  // server appends each result to the stored answer sheet.
-  for(let i = 0; i < total; i++){
-    status.textContent = 'Question ' + (i+1) + ' of ' + total +
-      ' — drafting, then checking every claim… · ' + Math.round((Date.now()-t0)/1000) + 's';
-    try{
-      const resp = await fetch('/questionnaire' + (i ? '?append=true' : ''), { method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ items: [samplePayload.items[i]] }) });
-      if(!resp.ok) throw new Error('run failed (' + resp.status + ')');
-      renderSheet(await resp.json());
-    }catch(e){ failed++; }
+// Paced parallel runner. Three questions in flight at once, a new
+// question starting at most every START_GAP_MS: the model account
+// allows 20 requests a minute and 8 in flight per key, and one
+// question costs several calls, so unbounded parallelism would
+// rate-limit itself. The Run button pauses and resumes; Stop ends
+// the run, discarding in-flight questions (their server-side calls
+// may finish in the background). While a run is active the button
+// cannot start another one, and a cooldown after each run guards
+// against accidental duplicate runs burning the daily budget.
+// Results merge client-side in question order, so the sheet on
+// screen never depends on which server instance answered; when the
+// run ends, the merged sheet syncs back for review and dispatch.
+const RUN_WORKERS = 3, START_GAP_MS = 12000, RERUN_COOLDOWN_S = 20;
+const runner = { state:'idle', merged:[], total:0, done:0, failed:0,
+                 inFlight:0, controllers:new Set(), nextStartAt:0,
+                 t0:0, ticker:null };
+const sleep = ms => new Promise(r=>setTimeout(r, ms));
+
+async function pace(){
+  const now = Date.now();
+  const wait = Math.max(0, runner.nextStartAt - now);
+  runner.nextStartAt = Math.max(now, runner.nextStartAt) + START_GAP_MS;
+  if (wait) await sleep(wait);
+}
+
+async function waitWhilePaused(){
+  while (runner.state === 'paused') await sleep(300);
+}
+
+function localSheet(){
+  const entries = runner.merged.filter(Boolean);
+  return { entries, markdown:'',
+    counts: { questions: entries.length,
+      answered: entries.filter(e=>e.status==='answered').length,
+      partial:  entries.filter(e=>e.status==='partial').length,
+      handoff:  entries.filter(e=>e.status==='handoff').length } };
+}
+
+function refreshRunUI(){
+  const btn = $('#run-btn'), stop = $('#stop-btn'), status = $('#run-status');
+  const secs = Math.round((Date.now()-runner.t0)/1000);
+  if (runner.state === 'running' || runner.state === 'paused'){
+    btn.disabled = false;
+    btn.textContent = runner.state === 'running' ? 'Pause' : 'Resume';
+    stop.classList.remove('hidden');
+    status.classList.remove('hidden');
+    status.textContent = (runner.state === 'paused' ? 'Paused' : 'Running') +
+      ' · ' + runner.done + ' of ' + runner.total + ' done · ' +
+      runner.inFlight + ' in flight · ' + secs + 's';
   }
-  status.classList.add('hidden');
-  btn.disabled = false; btn.textContent = 'Run ProofDesk again';
-  if(failed) toast(failed + ' question(s) could not be processed — the model endpoint may be rate-limited. Run again to retry.', false);
-  else toast('Answer sheet ready — every claim checked.');
+}
+
+async function worker(queue){
+  while (true){
+    await waitWhilePaused();
+    if (runner.state !== 'running') return;
+    const i = queue.shift();
+    if (i === undefined) return;
+    await pace();
+    await waitWhilePaused();
+    if (runner.state !== 'running') return;
+    const ctrl = new AbortController();
+    runner.controllers.add(ctrl); runner.inFlight++; refreshRunUI();
+    try{
+      const resp = await fetch('/questionnaire?append=true', { method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ items: [samplePayload.items[i]] }),
+        signal: ctrl.signal });
+      if(!resp.ok) throw new Error('run failed (' + resp.status + ')');
+      const sheet = await resp.json();
+      const entry = sheet.entries.find(e=>e.question === samplePayload.items[i].question)
+                    || sheet.entries[sheet.entries.length-1];
+      if (entry){ runner.merged[i] = entry; runner.done++; }
+      else runner.failed++;
+    }catch(e){
+      if (runner.state !== 'stopped') runner.failed++;
+    }finally{
+      runner.controllers.delete(ctrl); runner.inFlight--;
+      if (runner.merged.some(Boolean)) renderSheet(localSheet(), false);
+      refreshRunUI();
+    }
+  }
+}
+
+async function startRun(){
+  if (quotaLock.locked){ applyQuotaLock(); return; }
+  runner.state = 'running';
+  runner.total = samplePayload.items.length;
+  runner.merged = new Array(runner.total);
+  runner.done = 0; runner.failed = 0; runner.inFlight = 0;
+  runner.nextStartAt = 0; runner.t0 = Date.now();
+  hasSheet = false; $('#dispatch-btn').disabled = true;
+  refreshRunUI();
+  runner.ticker = setInterval(refreshRunUI, 1000);
+  const queue = samplePayload.items.map((_,i)=>i);
+  await Promise.all(Array.from({length: RUN_WORKERS}, ()=>worker(queue)));
+  clearInterval(runner.ticker);
+  await finishRun();
+}
+
+async function finishRun(){
+  const wasStopped = runner.state === 'stopped';
+  runner.state = 'finishing';
+  $('#stop-btn').classList.add('hidden');
+  let sheet = localSheet();
+  try{
+    const resp = await fetch('/answers/sync', { method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(sheet) });
+    if (resp.ok) sheet = await resp.json();
+  }catch(e){ /* keep the local sheet; review/dispatch may be partial */ }
+  renderSheet(sheet, true);
+  const status = $('#run-status');
+  status.classList.remove('hidden');
+  status.textContent = (wasStopped ? 'Stopped' : 'Finished') + ' · ' +
+    runner.done + ' of ' + runner.total + ' questions processed.';
+  if (runner.failed)
+    toast(runner.failed + ' question(s) could not be processed — the model endpoint may be rate-limited. Run again to retry.', false);
+  else if (!wasStopped)
+    toast('Answer sheet ready — every claim checked.');
+  runner.state = 'cooldown';
+  const btn = $('#run-btn');
+  let left = RERUN_COOLDOWN_S;
+  btn.disabled = true; btn.textContent = 'Run again in ' + left + 's';
+  const cd = setInterval(()=>{
+    left--;
+    if (left <= 0){
+      clearInterval(cd); runner.state = 'idle';
+      btn.textContent = 'Run ProofDesk again';
+      btn.disabled = quotaLock.locked; applyQuotaLock();
+    } else btn.textContent = 'Run again in ' + left + 's';
+  }, 1000);
+}
+
+function stopRun(){
+  if (runner.state !== 'running' && runner.state !== 'paused') return;
+  runner.state = 'stopped';
+  runner.controllers.forEach(c=>c.abort());
+}
+
+function onRunButton(){
+  if (runner.state === 'idle') startRun();
+  else if (runner.state === 'running'){ runner.state = 'paused'; refreshRunUI(); }
+  else if (runner.state === 'paused'){ runner.state = 'running'; refreshRunUI(); }
 }
 
 async function dispatch(){
@@ -330,7 +449,8 @@ async function dispatch(){
   btn.disabled = !hasSheet; btn.textContent = 'Dispatch to Evolus';
 }
 
-$('#run-btn').addEventListener('click', run);
+$('#run-btn').addEventListener('click', onRunButton);
+$('#stop-btn').addEventListener('click', stopRun);
 $('#dispatch-btn').addEventListener('click', dispatch);
 loadHealth(); loadSample();
 </script>
