@@ -54,6 +54,10 @@ class AnswerEntry:
     shipped_answer: str
     evidence_trail: list[EvidenceItem]
     flags: list[str]
+    # Passage ids the retrieval step supplied for this question
+    # (empty when the caller supplied the passages itself): the
+    # record of what the drafter was allowed to see.
+    retrieved_passages: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -119,17 +123,29 @@ class AnswerSheetService:
     with fakes."""
 
     def __init__(
-        self, drafting: DraftingService, checker: ClaimChecker
+        self,
+        drafting: DraftingService,
+        checker: ClaimChecker,
+        retriever=None,
     ) -> None:
         self._drafting = drafting
         self._checker = checker
+        self._retriever = retriever
 
     def build(self, items: list[QuestionItem]) -> AnswerSheet:
         return AnswerSheet(entries=[self._build_one(item) for item in items])
 
     def _build_one(self, item: QuestionItem) -> AnswerEntry:
+        # Supplied passages win; with none supplied and a retriever
+        # attached, the retrieval step fills them from the corpus
+        # and the entry records which passages it chose.
+        passages = item.passages
+        retrieved_ids: list[str] = []
+        if not passages and self._retriever is not None:
+            passages = self._retriever.retrieve(item.question)
+            retrieved_ids = [p.id for p in passages]
         try:
-            draft = self._drafting.draft(item.question, item.passages)
+            draft = self._drafting.draft(item.question, passages)
         except DraftingError as exc:
             # One failed question must not sink the whole sheet: it
             # becomes a hand-off, with the failure on the record.
@@ -139,8 +155,9 @@ class AnswerSheetService:
                 shipped_answer="",
                 evidence_trail=[],
                 flags=[f"drafting failed ({exc}); handed off to a human"],
+                retrieved_passages=retrieved_ids,
             )
-        sources = {p.id: p.source for p in item.passages}
+        sources = {p.id: p.source for p in passages}
         if not draft.claims:
             return AnswerEntry(
                 question=item.question,
@@ -151,8 +168,9 @@ class AnswerSheetService:
                     "the supplied documents do not answer this question; "
                     "handed off instead of guessing"
                 ],
+                retrieved_passages=retrieved_ids,
             )
-        checked = self._checker.check_draft(draft, item.passages)
+        checked = self._checker.check_draft(draft, passages)
         trail = [
             EvidenceItem(
                 claim=v.text,
@@ -188,6 +206,7 @@ class AnswerSheetService:
             shipped_answer=" ".join(v.text for v in shipped),
             evidence_trail=trail,
             flags=flags,
+            retrieved_passages=retrieved_ids,
         )
 
 
@@ -207,6 +226,10 @@ def render_markdown(sheet: AnswerSheet) -> str:
     for entry in sheet.entries:
         lines.append(f"## {entry.question}")
         lines.append(f"Status: {entry.status}")
+        if entry.retrieved_passages:
+            lines.append(
+                "Retrieved passages: " + ", ".join(entry.retrieved_passages)
+            )
         lines.append("")
         if entry.shipped_answer:
             lines.append(entry.shipped_answer)
