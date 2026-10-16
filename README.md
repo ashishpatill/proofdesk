@@ -1,6 +1,6 @@
 # ProofDesk
 
-https://github.com/user-attachments/assets/256a6d4a-8b5a-464a-aa6a-e72e9e84fbda
+https://github.com/user-attachments/assets/bf9648c0-3b57-4054-becd-bead09efd685
 
 ProofDesk answers security and compliance questionnaires from a
 company's own documents, and proves every answer before it ships.
