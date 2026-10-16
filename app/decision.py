@@ -501,6 +501,29 @@ class _JevClient:
         raise DecisionError("jev call failed: retries exhausted")
 
 
+def calibrate_jev_probability(raw: float) -> float:
+    """Map Jev's raw probability onto the pipeline's shared band
+    scale (ship >= 0.80, cut <= 0.30).
+
+    Jev's scale is compressed: on 2,091 ContractNLI judgements
+    (experiments/external-contractnli.md) its NotMentioned
+    probabilities sit at median 0.02 / p90 0.06, while truly
+    supported claims score p25 0.33 / median 0.66. Read at face
+    value against the shared bands, a third of supported claims
+    fell under the cut line and the sample eval dropped to 6/15.
+    Two anchors from that distribution, linear between and
+    beyond: raw 0.05 -> 0.30 (the cut line; raw scores at or
+    below it are almost never supported) and raw 0.30 -> 0.80
+    (the ship line; the supported class's lower quartile sits
+    just above it). Monotone, so Jev's own ordering is kept.
+    """
+    if raw <= 0.05:
+        return round(min(raw, 1.0) * 6.0, 4)
+    if raw <= 0.30:
+        return round(0.30 + (raw - 0.05) * 2.0, 4)
+    return round(0.80 + (raw - 0.30) * (0.20 / 0.70), 4)
+
+
 class JevClaimSupportBackend:
     name = "jev"
 
@@ -527,6 +550,7 @@ class JevClaimSupportBackend:
             ) from exc
         if not 0.0 <= probability <= 1.0:
             raise DecisionError("jev claim-support probability outside 0..1")
+        probability = calibrate_jev_probability(probability)
         return ClaimSupportResult(
             claim=claim,
             supported=probability >= 0.5,

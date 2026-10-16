@@ -71,7 +71,11 @@ def test_triage_endpoint_shape_without_d3():
 
 import httpx
 
-from app.decision import ClaimSupportService, JevClaimSupportBackend
+from app.decision import (
+    ClaimSupportService,
+    JevClaimSupportBackend,
+    calibrate_jev_probability,
+)
 
 
 class _FakeResponse:
@@ -110,7 +114,7 @@ def test_jev_claim_support_maps_noul_probability(monkeypatch):
         "All data at rest is encrypted with AES-256 (AWS KMS).",
     )
     assert result.backend == "jev"
-    assert result.probability == 0.93
+    assert result.probability == 0.98  # calibrated from raw 0.93
     assert result.supported is True
     assert seen["url"] == "https://api.typesafe.ai/v1/systemone"
     assert seen["headers"]["Authorization"] == "Bearer test-key"
@@ -133,7 +137,7 @@ def test_jev_claim_support_low_probability_is_unsupported(monkeypatch):
         "We are ISO 27001 certified.", "We hold a SOC 2 Type II report."
     )
     assert result.supported is False
-    assert result.probability == 0.12
+    assert result.probability == 0.44  # calibrated from raw 0.12
 
 
 def test_jev_missing_key_falls_back_to_rules():
@@ -188,7 +192,7 @@ def test_jev_retries_transient_529_then_succeeds(monkeypatch):
         "Data is encrypted.", "Data is encrypted at rest."
     )
     assert result.backend == "jev"
-    assert result.probability == 0.9
+    assert result.probability == 0.9714  # calibrated from raw 0.9
     assert calls["n"] == 2
 
 
@@ -223,3 +227,13 @@ def test_jev_persistent_429_falls_back_to_rules(monkeypatch):
         "Data is encrypted.", "Data is encrypted at rest."
     )
     assert result.backend == "rules"
+
+
+def test_jev_calibration_anchors_and_monotonicity():
+    assert calibrate_jev_probability(0.0) == 0.0
+    assert calibrate_jev_probability(0.05) == 0.30
+    assert calibrate_jev_probability(0.30) == 0.80
+    assert calibrate_jev_probability(1.0) == 1.0
+    points = [i / 20 for i in range(21)]
+    mapped = [calibrate_jev_probability(p) for p in points]
+    assert mapped == sorted(mapped)
