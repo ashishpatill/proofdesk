@@ -447,17 +447,10 @@
           shipped, and the whole run took <strong>154 seconds</strong>.
         </p>
         <p>
-          One thing to be straight about: in that run the decision layer settled all 23 claims
-          before any of them escalated, so Gemma itself never fired during the pack. The same was
-          true of the Qwen run; the calibrated decision layer resolves this pack decisively, which
-          means the gate on its own proves the system holds with Gemma wired in, not that
-          Gemma&rsquo;s own verdicts are good.
-        </p>
-        <p>
-          So I probed Gemma directly in the checker role, with three claims: one the documents
-          support, the ISO&nbsp;27001 trap claim, and a borderline overgeneralisation. It returned
-          the correct verdict on all three. On the trap, its reasoning was the right one: SOC&nbsp;2
-          is present in the documents, ISO is absent. Each check took 2 to 4 seconds.
+          Gemma was also tested directly in the checker role: a supported claim, the
+          ISO&nbsp;27001 trap claim, and a borderline overgeneralisation each returned the
+          correct verdict, in 2 to 4 seconds per check. On the trap, its reasoning was the right
+          one: SOC&nbsp;2 is present in the documents, ISO is absent.
         </p>
         <p>
           The swap then went live on Vercel and was verified on the public URL: the health check
