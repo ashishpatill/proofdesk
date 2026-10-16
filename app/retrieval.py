@@ -19,15 +19,20 @@ on ties. A query sharing no significant token with a passage
 scores it 0, and zero-score passages are never returned — a
 question nothing in the corpus speaks to retrieves nothing, and
 the pipeline hands it off instead of drafting from noise.
+
+Ranking being deterministic, retrieve() is cached in-process on
+(question, corpus version hash) — see app/caching.py. The cache is
+keyed, not invalidated: change a document and its corpus hash
+changes with it.
 """
 
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 from collections import Counter
 
+from app.caching import DEFAULT_CACHES, corpus_version_hash
 from app.drafting import Passage
 
 _TOKEN = re.compile(r"[a-z0-9][a-z0-9\-]*")
@@ -101,17 +106,17 @@ class BM25Index:
 class Retriever:
     """A BM25 index over one corpus, with the corpus fingerprint
     the caches key on (stage 3): the same question against a
-    different document set must never reuse a result."""
+    different document set must never reuse a result.
 
-    def __init__(self, passages: list[Passage]) -> None:
+    retrieve() reads and fills the retrieval cache; with the cache
+    off, or on a cold entry, it ranks exactly as before."""
+
+    def __init__(self, passages: list[Passage], caches=None) -> None:
         self._passages = list(passages)
         self._by_id = {p.id: p for p in self._passages}
         self._index = BM25Index(self._passages)
-        canonical = "\n".join(
-            f"{p.id}\x00{p.text}"
-            for p in sorted(self._passages, key=lambda p: p.id)
-        )
-        self.corpus_hash = hashlib.sha256(canonical.encode()).hexdigest()
+        self._caches = DEFAULT_CACHES if caches is None else caches
+        self.corpus_hash = corpus_version_hash(self._passages)
 
     def __contains__(self, passage_id: str) -> bool:
         return passage_id in self._by_id
@@ -119,8 +124,24 @@ class Retriever:
     def passage(self, passage_id: str) -> Passage | None:
         return self._by_id.get(passage_id)
 
+    def _ranked_ids(self, question: str) -> list[str]:
+        """The whole ranking for a question, through the cache.
+
+        Only the ids are stored: the caller slices the top k, and
+        the entries are the corpus's own ids, so a hit resolves
+        back to exactly the passages a miss would have returned."""
+        if not self._caches.enabled:
+            return [p.id for p, _ in self._index.rank(question)]
+        cache = self._caches.retrieval
+        cached = cache.get_ids(question, self.corpus_hash)
+        if cached is not None:
+            return cached
+        ranked = [p.id for p, _ in self._index.rank(question)]
+        cache.put_ids(question, self.corpus_hash, ranked)
+        return ranked
+
     def retrieve(self, question: str, k: int = DEFAULT_K) -> list[Passage]:
-        return [p for p, _ in self._index.rank(question)[:k]]
+        return [self._by_id[i] for i in self._ranked_ids(question)[:k]]
 
     def rank(self, text: str) -> list[tuple[Passage, float]]:
         return self._index.rank(text)

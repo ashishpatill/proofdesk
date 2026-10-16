@@ -33,6 +33,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from app.caching import DEFAULT_CACHES, caches_from_settings
 from app.decision import ClaimSupportService
 from app.drafting import Claim, DraftResult, Passage
 from app.vllm_client import VLLMClient, VLLMError
@@ -142,9 +143,45 @@ class ClaimChecker:
         self,
         support: ClaimSupportService,
         checker: CheckerService | None,
+        caches=None,
     ) -> None:
         self._support = support
         self._checker = checker
+        self._caches = DEFAULT_CACHES if caches is None else caches
+
+    def _precheck(self, claim_text: str, cited: list[Passage]):
+        """The decision layer's verdict on one claim, through the
+        verdict cache when using one is safe.
+
+        Three deliberate limits:
+
+        - Only the decision layer's answer is cached, never the
+          route taken from it. The 0.80/0.30 bands are re-applied to
+          the cached probability on every read, so a cached verdict
+          can never outlive a change to how it is read.
+        - A support service that does not declare its identity (a
+          test stub, say) is never cached. An unidentified verifier
+          has nothing to key on, and guessing one would let one
+          model's answer stand in for another's.
+        - A result from anything other than the configured primary
+          backend is not stored. When the primary fails, the rules
+          fallback answers, and that degraded answer must not be
+          frozen in as the model's permanent view of the claim.
+        """
+        joined = "\n\n".join(p.text for p in cited)
+        identity = getattr(self._support, "identity", None)
+        primary = getattr(self._support, "primary_name", None)
+        if identity is None or not self._caches.enabled:
+            return self._support.claim_support(claim_text, joined)
+        cache = self._caches.verdicts
+        key = cache.key(claim_text, cited, identity)
+        cached = cache.get(key)
+        if cached is not None:
+            return cached
+        result = self._support.claim_support(claim_text, joined)
+        if getattr(result, "backend", None) == primary:
+            cache.put(key, result)
+        return result
 
     def check_draft(
         self, draft: DraftResult, passages: list[Passage]
@@ -178,8 +215,7 @@ class ClaimChecker:
     ) -> ClaimVerdict:
         cited = [by_id[c] for c in claim.citations if c in by_id]
         if cited:
-            passage_text = "\n\n".join(p.text for p in cited)
-            pre = self._support.claim_support(claim.text, passage_text)
+            pre = self._precheck(claim.text, cited)
             if pre.probability >= SHIP_AT:
                 return ClaimVerdict(
                     text=claim.text, citations=claim.citations,
@@ -237,4 +273,8 @@ def claim_checker_from_settings(settings) -> ClaimChecker:
     return ClaimChecker(
         support=ClaimSupportService(settings, timeout=3.0),
         checker=CheckerService(VLLMClient(settings), model=settings.checker_model),
+        # Built from the settings so CACHE_ENABLED=0 really does run
+        # every eval case against a cold cache — this factory is what
+        # eval/run_eval.py goes through, and it never imports the app.
+        caches=caches_from_settings(settings),
     )

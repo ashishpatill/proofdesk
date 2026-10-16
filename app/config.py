@@ -20,6 +20,10 @@ class Settings:
     evolus_api_key: str = ""
     evolus_application_id: str = ""
     evolus_workflow_id: str = ""
+    # In-process caches (stage 3) are on by default; CACHE_ENABLED=0
+    # bypasses them entirely, which is how the eval harness runs every
+    # case against a cold cache.
+    cache_enabled: bool = True
 
 
 def load_settings() -> Settings:
@@ -44,4 +48,6 @@ def load_settings() -> Settings:
         evolus_api_key=os.environ.get("EVOLUS_API_KEY", ""),
         evolus_application_id=os.environ.get("EVOLUS_APPLICATION_ID", ""),
         evolus_workflow_id=os.environ.get("EVOLUS_WORKFLOW_ID", ""),
+        cache_enabled=os.environ.get("CACHE_ENABLED", "1").strip().lower()
+        not in ("0", "false", "no", "off"),
     )

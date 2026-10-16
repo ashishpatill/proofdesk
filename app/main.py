@@ -37,6 +37,7 @@ from app.answers import (
     render_markdown,
     review_queue,
 )
+from app.caching import cache_stats, set_cache_enabled
 from app.checking import claim_checker_from_settings, split_claims
 from app.config import load_settings
 from app.decision import DecisionService
@@ -52,6 +53,9 @@ from app.sample import sample_items
 from app.vllm_client import VLLMClient, VLLMError
 
 settings = load_settings()
+# CACHE_ENABLED is honoured process-wide as well as per factory, so a
+# retriever built without an explicit cache set respects it too.
+set_cache_enabled(settings.cache_enabled)
 
 app = FastAPI(title="ProofDesk", version="0.1.0")
 
@@ -116,6 +120,7 @@ def health() -> dict:
         "decision_model": settings.decision_model,
         "vllm": probe,
         "quota": quota,
+        "caches": cache_stats(),
     }
 
 

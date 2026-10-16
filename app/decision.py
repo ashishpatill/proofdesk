@@ -265,11 +265,24 @@ class HTTPClaimSupportBackend:
 
 class ClaimSupportService:
     """Configured primary backend first, rules on any failure — same
-    discipline as triage."""
+    discipline as triage.
+
+    ``identity`` names the verifier that would decide a claim: its
+    backend, its endpoint, and its pinned model/version. The verdict
+    cache keys on it, so a verdict is never served to a different
+    model, a different host, or a different version of the same
+    model. ``primary_name`` is the backend the service actually
+    calls, which is how a rules fallback after a failure is kept out
+    of the cache: a transient outage must not be frozen in as a
+    judgement."""
 
     def __init__(self, settings: Settings, timeout: float = 10.0) -> None:
         self._primary = _claim_support_backend(settings, timeout)
         self._fallback = RulesClaimSupportBackend()
+        self.identity = claim_support_identity(settings)
+        self.primary_name = claim_support_backend_name(
+            settings.decision_backend
+        )
 
     def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
         try:
@@ -547,11 +560,41 @@ def _triage_backend(settings: Settings, timeout: float):
     return HTTPDecisionBackend(settings, timeout=timeout)
 
 
+def claim_support_backend_name(decision_backend: str) -> str:
+    """Which backend would serve claim support for this setting.
+
+    The single source of truth for the mapping, so the backend that
+    gets built and the backend the verdict cache is keyed on can
+    never drift apart."""
+    return {
+        "llm": "llm",
+        "jev": "jev",
+        "rules": "rules",
+    }.get(decision_backend, "d3")
+
+
+def claim_support_identity(settings: Settings) -> str:
+    """What would decide a claim: the backend, the endpoint it would
+    be reached at, and the pinned model or version. Anything that
+    changes who answers or how they are pinned must change this
+    string, or a stale verdict outlives the change."""
+    name = claim_support_backend_name(settings.decision_backend)
+    if name == "jev":
+        return f"jev|{settings.typesafe_base_url}|{settings.jev_model}"
+    if name == "llm":
+        return f"llm|{settings.vllm_base_url}|{settings.decision_model}"
+    if name == "d3":
+        return f"d3|{settings.decision_base_url}|{settings.decision_model}"
+    # The rules backend is this file's own code: no host, no version.
+    return "rules|1"
+
+
 def _claim_support_backend(settings: Settings, timeout: float):
-    if settings.decision_backend == "llm":
+    name = claim_support_backend_name(settings.decision_backend)
+    if name == "llm":
         return LLMClaimSupportBackend(settings, timeout=max(timeout, 30.0))
-    if settings.decision_backend == "jev":
+    if name == "jev":
         return JevClaimSupportBackend(settings, timeout=max(timeout, 30.0))
-    if settings.decision_backend == "rules":
+    if name == "rules":
         return RulesClaimSupportBackend()
     return HTTPClaimSupportBackend(settings, timeout=timeout)
