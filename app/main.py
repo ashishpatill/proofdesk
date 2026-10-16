@@ -38,7 +38,7 @@ from app.answers import (
     review_queue,
 )
 from app.checking import claim_checker_from_settings, split_claims
-from app.config import load_settings
+from app.config import Settings, load_settings
 from app.decision import DecisionService
 from app.drafting import (
     Claim,
@@ -96,6 +96,18 @@ def index():
     return FileResponse(_STATIC_DIR / "index.html")
 
 
+def _decision_layer_label(s: Settings) -> str:
+    """What the UI pill names as the decision layer. Under the jev
+    backend the claim-support decisions are Jev's, while DECISION_MODEL
+    only drives triage — reporting the triage model there mislabels
+    the product, so name the backend that actually decides."""
+    if s.decision_backend == "jev":
+        return f"Jev ({s.jev_model})"
+    if s.decision_backend == "rules":
+        return "deterministic rules"
+    return s.decision_model
+
+
 @app.get("/health")
 def health() -> dict:
     client = VLLMClient(settings, timeout=3.0)
@@ -113,7 +125,7 @@ def health() -> dict:
         "status": "ok",
         "drafter_model": settings.drafter_model,
         "checker_model": settings.checker_model,
-        "decision_model": settings.decision_model,
+        "decision_model": _decision_layer_label(settings),
         "vllm": probe,
         "quota": quota,
     }

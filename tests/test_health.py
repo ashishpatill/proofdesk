@@ -19,6 +19,24 @@ def test_health_shape_without_vllm():
     assert body["quota"] is None
 
 
+def test_decision_layer_label_names_the_deciding_backend():
+    from app.config import Settings
+    from app.main import _decision_layer_label
+
+    # Under jev, DECISION_MODEL only drives triage; the pill must
+    # name Jev, not the triage model.
+    assert _decision_layer_label(Settings(decision_backend="jev")) == (
+        "Jev (jev-1.13.0)"
+    )
+    assert _decision_layer_label(
+        Settings(decision_backend="llm", decision_model="DeepSeek-V4.1-Flash")
+    ) == "DeepSeek-V4.1-Flash"
+    assert (
+        _decision_layer_label(Settings(decision_backend="rules"))
+        == "deterministic rules"
+    )
+
+
 def test_index_serves_ui():
     resp = client.get("/")
     assert resp.status_code == 200
