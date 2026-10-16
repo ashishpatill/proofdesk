@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>ProofDesk Build Log</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&family=IBM+Plex+Mono:wght@400;500&family=Caveat:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --paper: #fcfcfa;
+        --ink: #23272e;
+        --ink-soft: #4a5058;
+        --rule: #d9dee6;
+        --margin-line: #e3a49b;
+        --red: #b23a2a;
+        --blue: #2f4d8f;
+        --table-line: #c9cfd8;
+        --stamp-bg: transparent;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #17191d;
+          --ink: #e3e6ea;
+          --ink-soft: #a7aeb8;
+          --rule: #262b33;
+          --margin-line: #6e443e;
+          --red: #e08a76;
+          --blue: #93aede;
+          --table-line: #333a44;
+        }
+      }
+
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font-family: "Newsreader", Georgia, "Times New Roman", serif;
+        font-size: 19px;
+        line-height: 1.62;
+      }
+
+      .page {
+        max-width: 720px;
+        margin: 0 auto;
+        padding: 44px 24px 72px 24px;
+        position: relative;
+      }
+
+      /* ruled notebook lines + red margin rule, desktop only for the margin */
+      .page::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background-image: repeating-linear-gradient(
+          to bottom,
+          transparent 0,
+          transparent 31px,
+          var(--rule) 31px,
+          var(--rule) 32px
+        );
+        opacity: 0.55;
+      }
+      @media (min-width: 760px) {
+        .page { padding-left: 76px; }
+        .page::after {
+          content: "";
+          position: absolute;
+          top: 0;
+          bottom: 0;
+          left: 52px;
+          width: 1px;
+          background: var(--margin-line);
+          opacity: 0.8;
+          pointer-events: none;
+        }
+      }
+
+      .page > * { position: relative; }
+
+      /* ---------- header ---------- */
+      header { margin-bottom: 40px; }
+      .filed {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        margin: 0 0 14px;
+      }
+      h1 {
+        font-size: 34px;
+        line-height: 1.15;
+        font-weight: 600;
+        margin: 0 0 12px;
+        letter-spacing: -0.01em;
+      }
+      .byline {
+        margin: 0;
+        color: var(--ink-soft);
+        font-size: 17px;
+      }
+      .byline .name { color: var(--ink); font-weight: 500; }
+
+      /* ---------- entries ---------- */
+      article { margin-bottom: 48px; }
+      .entry-head {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 8px 14px;
+        margin-bottom: 14px;
+      }
+      .date {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 13px;
+        letter-spacing: 0.06em;
+        color: var(--ink-soft);
+        white-space: nowrap;
+      }
+      h2 {
+        font-size: 24px;
+        line-height: 1.25;
+        font-weight: 600;
+        margin: 0;
+        letter-spacing: -0.005em;
+      }
+      .stamp {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 11px;
+        font-weight: 500;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--red);
+        border: 1.5px solid var(--red);
+        border-radius: 3px;
+        padding: 2px 7px 1px;
+        transform: rotate(-2deg);
+        background: var(--stamp-bg);
+        white-space: nowrap;
+      }
+      .stamp.blue { color: var(--blue); border-color: var(--blue); transform: rotate(1.5deg); }
+
+      p { margin: 0 0 16px; }
+      p:last-child { margin-bottom: 0; }
+      strong { font-weight: 600; }
+
+      .note {
+        font-family: "Caveat", cursive;
+        font-size: 21px;
+        font-weight: 600;
+        color: var(--red);
+        display: inline-block;
+        transform: rotate(-1deg);
+        margin-left: 6px;
+      }
+
+      /* ---------- table ---------- */
+      .table-wrap { margin: 20px 0 22px; overflow-x: auto; }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        font-size: 16.5px;
+        line-height: 1.45;
+      }
+      caption {
+        text-align: left;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+        padding-bottom: 8px;
+      }
+      th, td {
+        text-align: left;
+        padding: 8px 12px 8px 0;
+        border-bottom: 1px solid var(--table-line);
+        vertical-align: top;
+      }
+      th {
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 12px;
+        font-weight: 500;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ink-soft);
+      }
+      td.num, th.num { text-align: right; padding-right: 0; font-variant-numeric: tabular-nums; }
+      td.num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 15px; }
+      tr.jev td { font-weight: 600; }
+
+      /* ---------- closing / the rule ---------- */
+      .rule-box {
+        border-top: 2px solid var(--ink);
+        padding-top: 20px;
+        margin-top: 8px;
+      }
+      .rule-box h2 { margin-bottom: 12px; }
+      .gate {
+        list-style: none;
+        margin: 18px 0 20px;
+        padding: 0;
+        font-family: "IBM Plex Mono", ui-monospace, monospace;
+        font-size: 14.5px;
+        line-height: 1.5;
+      }
+      .gate li {
+        padding: 7px 0 7px 22px;
+        position: relative;
+        border-bottom: 1px dashed var(--table-line);
+      }
+      .gate li::before {
+        content: "—";
+        position: absolute;
+        left: 0;
+        color: var(--red);
+      }
+      .gate li:last-child { border-bottom: none; }
+
+      footer {
+        margin-top: 44px;
+        padding-top: 18px;
+        border-top: 1px solid var(--table-line);
+        font-size: 16.5px;
+        color: var(--ink-soft);
+      }
+      footer p { margin: 0 0 6px; }
+      a {
+        color: var(--blue);
+        text-decoration: underline;
+        text-underline-offset: 3px;
+        text-decoration-thickness: 1px;
+      }
+      a:hover { text-decoration-thickness: 2px; }
+
+      @media (max-width: 480px) {
+        body { font-size: 18px; }
+        h1 { font-size: 29px; }
+        h2 { font-size: 22px; }
+        .page { padding-top: 32px; }
+        .note { display: block; margin: 2px 0 0; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page">
+      <header>
+        <p class="filed">Field notes · AMD Developer Hackathon Act III · October 2026</p>
+        <h1>Building ProofDesk: what worked, what didn&rsquo;t, and what the numbers said</h1>
+        <p class="byline">Built by <span class="name">Ashish Pisey</span></p>
+      </header>
+
+      <article>
+        <div class="entry-head">
+          <span class="date">Thu 15 Oct</span>
+          <h2>The slow version that worked</h2>
+          <span class="stamp blue">Shipped</span>
+        </div>
+        <p>
+          ProofDesk answers vendor security questionnaires. A customer sends forty questions about
+          encryption, subprocessors, certifications. Someone on your team spends days digging through
+          policy documents to answer them. ProofDesk drafts each answer from the company&rsquo;s own
+          documents, then checks every claim in the draft against the source document before anything
+          is allowed to go out. A claim that can&rsquo;t be traced back doesn&rsquo;t ship.
+        </p>
+        <p>
+          Version one did the checking with a big chat model, DeepSeek running on AMD Token Factory.
+          It worked. On a labelled 15-question test questionnaire it scored <strong>14/15</strong>, and
+          it handled the trap we planted: the documents support SOC&nbsp;2, the question asks about
+          ISO&nbsp;27001, and ProofDesk refused to answer rather than bluff. Nothing was sent.
+        </p>
+        <p>
+          The problem was speed. Each claim check took about <strong>19 seconds</strong>. A full run
+          took 677 seconds, roughly eleven minutes of mostly waiting. Fine for a demo. Painful for
+          anything real.
+        </p>
+      </article>
+
+      <article>
+        <div class="entry-head">
+          <span class="date">Fri 16 Oct</span>
+          <h2>Grading the graders first</h2>
+          <span class="stamp blue">Measured</span>
+        </div>
+        <p>
+          Before swapping the checker, I wanted a measurement that wasn&rsquo;t my own test set, so I
+          benchmarked the decision layer on ContractNLI: <strong>2,091 human judgements</strong> from
+          real contracts, published by Stanford researchers at EMNLP 2021. The task matches ours. Given
+          a claim and a passage, does the passage support it, contradict it, or not mention it at all?
+        </p>
+        <div class="table-wrap">
+          <table>
+            <caption>ContractNLI, full test split (2,091 claims)</caption>
+            <thead>
+              <tr>
+                <th scope="col">Checker</th>
+                <th scope="col" class="num">Accuracy</th>
+                <th scope="col" class="num">False approvals</th>
+                <th scope="col" class="num">Per check</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>Word-overlap rules</td>
+                <td class="num">59.2%</td>
+                <td class="num">384</td>
+                <td class="num">&mdash;</td>
+              </tr>
+              <tr class="jev">
+                <td>Jev (TypeSafe)</td>
+                <td class="num">82.1%</td>
+                <td class="num">36</td>
+                <td class="num">0.77 s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p>
+          Jev is a small model built only for decisions like this, no chat, no drafting. The number I
+          cared about was false approvals: <strong>36, against 384</strong> for the simple rules.
+          <span class="note">&larr; the number that matters</span>
+          A checker that waves an unsupported claim through is worse than no checker at all, because it
+          makes the wrong answer look verified.
+        </p>
+      </article>
+
+      <article>
+        <div class="entry-head">
+          <span class="date">Fri 16 Oct</span>
+          <h2>The swap that failed, and the fix</h2>
+          <span class="stamp">Gate failed</span>
+        </div>
+        <p>
+          So I wired Jev in as the checker and re-ran the test set. Score: <strong>6/15</strong>.
+          Most of the damage was good answers blocked and handed off as unanswerable, and the trap
+          still held. But it wasn&rsquo;t a clean run: q13, an unanswerable question about
+          on-premises deployment, got answered when it should have handed off. That is a failed
+          experiment by our own rule, whatever the benchmark said.
+        </p>
+        <p>
+          The ContractNLI data explained it. Jev&rsquo;s scores run conservative: it is near-certain
+          when a claim is false, and cautious when one is true. A third of truly supported claims scored
+          below 0.5, and 0.5 was the pass mark in the pipeline, a number set for the chat model&rsquo;s
+          scale, not Jev&rsquo;s. The model wasn&rsquo;t wrong. The ruler was.
+        </p>
+        <p>
+          The fix is calibration, not a new model: remap Jev&rsquo;s scores onto the pipeline&rsquo;s
+          scale using that 2,091-judgement distribution, where the false claims cluster down near 0.02.
+          Lowering the bar is not free, though: on that same data, contradicted claims have a tail,
+          their 90th percentile score reaching 0.47, and that tail is the number to watch in the
+          re-test.
+          The recalibrated version then went through the same gate as everything else.
+        </p>
+      </article>
+
+      <article>
+        <div class="entry-head">
+          <span class="date">Fri 16 Oct</span>
+          <h2>The re-gate</h2>
+          <span class="stamp blue">Gate passed</span>
+        </div>
+        <p>
+          The recalibrated build (repo commit 55b41ec, running with the decision backend set to Jev
+          and its probabilities recalibrated) re-ran the same 15 questions. Score:
+          <strong>14/15</strong>. Total question time was 440.4 seconds (wall 440.4s), down from 677 with the
+          chat-model checker, and every evidence check in the run, 22 of them, went to the decision
+          backend.
+        </p>
+        <p>
+          The trap held. q12, the ISO&nbsp;27001 question, handed off instead of answering, and the
+          unsupported claim was not shipped, shipped=False in the run log. It was the slowest
+          question in the run at 135.4 seconds, but it stayed blocked.
+        </p>
+        <p>
+          The one failure was q13 again: the on-premises question, answered in 28.3 seconds when it
+          should have handed off. It was wrongly answered in both earlier Jev runs too, and it is
+          the same known flaky miss the version-one baseline had. No FAIL detail in the run flags
+          an unsupported claim as shipped; the only shipped-claim check in the run is the trap,
+          and it recorded shipped=False.
+        </p>
+        <p>
+          Against the gate as written, 14/15 or better, trap blocked, and zero unsupported claims
+          flagged as shipped in the FAIL details, that is a pass. Jev is cleared to ship to the live site, pending one manual step: adding
+          the TypeSafe API key to the deployment environment. The Contradiction tail from the
+          calibration data is still the number to watch; passing on 15 questions doesn&rsquo;t
+          retire it.
+        </p>
+      </article>
+
+      <article>
+        <div class="entry-head">
+          <span class="date">Fri 16 Oct</span>
+          <h2>Search, first attempt</h2>
+          <span class="stamp">Reverted</span>
+        </div>
+        <p>
+          Retrieval was the other hand-built part. In version one I picked, by hand, which passages each
+          question would see. That doesn&rsquo;t scale past a demo, so I replaced it with BM25, plain
+          word search, and let it choose the passages automatically.
+        </p>
+        <p>
+          It scored <strong>10/15</strong>, down from 14/15. I reverted it the same day.
+        </p>
+        <p>
+          The audit afterwards used no models at all, just checking where the right passage had landed
+          in the rankings. On three questions the search put the correct passage below noise, because
+          the question&rsquo;s wording differs from the document&rsquo;s wording. On two more the right
+          passage was found, but feeding the drafter eight loosely ranked passages instead of a tight
+          hand-picked bundle made the drafting itself worse.
+        </p>
+        <p>
+          The note I left in the experiment doc: word-matching alone is not enough for compliance text.
+          The next design searches by words and by meaning together, then reranks what it finds, and
+          each of those steps gets gated on the same 15 questions before it goes anywhere near the
+          demo.
+        </p>
+      </article>
+
+      <section class="rule-box">
+        <h2>The rule the whole week ran on</h2>
+        <p>
+          Nothing ships unless it passes the same gate, whatever the benchmark numbers promise:
+        </p>
+        <ul class="gate">
+          <li>holds 14/15 on the labelled questionnaire</li>
+          <li>the ISO 27001 trap stays blocked</li>
+          <li>zero unsupported claims sent</li>
+        </ul>
+        <p>
+          Two of the changes in these notes failed that test on their first run. One was reverted.
+          The other was fixed by recalibration and passed the re-gate, 14/15 with the trap blocked
+          and no unsupported claim flagged as shipped, with the same one flaky question still
+          failing the way it failed before. That is slower than shipping on a good feeling, but a tool whose whole job
+          is checking claims should probably be built that way.
+        </p>
+      </section>
+
+      <footer>
+        <p>
+          Full experiment notes, scores and code:
+          <a href="https://github.com/ashishpatill/proofdesk">github.com/ashishpatill/proofdesk</a>
+        </p>
+        <p>
+          The live demo, now running the calibrated Jev decision layer, verified
+          end to end on the public URL:
+          <a href="https://proofdesk-nine.vercel.app">proofdesk-nine.vercel.app</a>
+        </p>
+      </footer>
+    </div>
+  </body>
+</html>
