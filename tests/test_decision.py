@@ -75,10 +75,14 @@ from app.decision import ClaimSupportService, JevClaimSupportBackend
 
 
 class _FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200):
         self._payload = payload
+        self.status_code = status_code
+        self.headers = {}
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPError(f"status {self.status_code}")
         return None
 
     def json(self):
@@ -145,6 +149,7 @@ def test_jev_transport_error_falls_back_to_rules(monkeypatch):
         raise httpx.ConnectError("down")
 
     monkeypatch.setattr("app.decision.httpx.post", boom)
+    monkeypatch.setattr("app.decision.time.sleep", lambda s: None)
     service = ClaimSupportService(_jev_settings())
     result = service.claim_support(
         "Data is encrypted.", "Data is encrypted at rest."
@@ -159,6 +164,60 @@ def test_jev_out_of_range_probability_falls_back_to_rules(monkeypatch):
             {"answers": {"support": {"type": "noul", "noul": 1.4}}}
         ),
     )
+    service = ClaimSupportService(_jev_settings())
+    result = service.claim_support(
+        "Data is encrypted.", "Data is encrypted at rest."
+    )
+    assert result.backend == "rules"
+
+
+def test_jev_retries_transient_529_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _FakeResponse({}, status_code=529)
+        return _FakeResponse(
+            {"answers": {"support": {"type": "noul", "noul": 0.9}}}
+        )
+
+    monkeypatch.setattr("app.decision.httpx.post", flaky)
+    monkeypatch.setattr("app.decision.time.sleep", lambda s: None)
+    result = JevClaimSupportBackend(_jev_settings()).claim_support(
+        "Data is encrypted.", "Data is encrypted at rest."
+    )
+    assert result.backend == "jev"
+    assert result.probability == 0.9
+    assert calls["n"] == 2
+
+
+def test_jev_retries_timeout_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.ConnectTimeout("slow egress")
+        return _FakeResponse(
+            {"answers": {"support": {"type": "noul", "noul": 0.9}}}
+        )
+
+    monkeypatch.setattr("app.decision.httpx.post", flaky)
+    monkeypatch.setattr("app.decision.time.sleep", lambda s: None)
+    result = JevClaimSupportBackend(_jev_settings()).claim_support(
+        "Data is encrypted.", "Data is encrypted at rest."
+    )
+    assert result.backend == "jev"
+    assert calls["n"] == 2
+
+
+def test_jev_persistent_429_falls_back_to_rules(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.httpx.post",
+        lambda *a, **k: _FakeResponse({}, status_code=429),
+    )
+    monkeypatch.setattr("app.decision.time.sleep", lambda s: None)
     service = ClaimSupportService(_jev_settings())
     result = service.claim_support(
         "Data is encrypted.", "Data is encrypted at rest."

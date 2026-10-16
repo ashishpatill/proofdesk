@@ -437,6 +437,9 @@ _JEV_SUPPORT_INSTRUCTIONS = (
 )
 
 
+import time
+
+
 class _JevClient:
     """Thin wrapper over the TypeSafe System One endpoint. Unlike
     the d3 sidecar (direct infrastructure traffic), this is a
@@ -452,24 +455,50 @@ class _JevClient:
     def evaluate(self, state: str, questions: dict) -> dict:
         if not self._key:
             raise DecisionError("TYPESAFE_API_KEY is not set")
-        try:
-            resp = httpx.post(
-                f"{self._base}/v1/systemone",
-                json={
-                    "state": state,
-                    "model": self._model,
-                    "questions": questions,
-                },
-                headers={"Authorization": f"Bearer {self._key}"},
-                timeout=self._timeout,
-            )
-            resp.raise_for_status()
-            answers = resp.json()["answers"]
-        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
-            raise DecisionError(f"jev call failed: {exc}") from exc
-        if not isinstance(answers, dict):
-            raise DecisionError("jev returned a non-object answers map")
-        return answers
+        # TypeSafe's own guidance for 429/529 is backoff and retry,
+        # and an egress proxy can stall one call that a retry
+        # completes in half a second: mirror the chat client's
+        # discipline (Retry-After honoured, two retries) rather
+        # than reading a transient stall as a Jev failure and
+        # silently degrading to the rules fallback.
+        delays = [1.0, 3.0]
+        for attempt in range(len(delays) + 1):
+            try:
+                resp = httpx.post(
+                    f"{self._base}/v1/systemone",
+                    json={
+                        "state": state,
+                        "model": self._model,
+                        "questions": questions,
+                    },
+                    headers={"Authorization": f"Bearer {self._key}"},
+                    timeout=self._timeout,
+                )
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
+                if attempt < len(delays):
+                    time.sleep(delays[attempt])
+                    continue
+                raise DecisionError(f"jev call failed: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise DecisionError(f"jev call failed: {exc}") from exc
+            if resp.status_code in (429, 503, 529) and attempt < len(delays):
+                retry_after = resp.headers.get("Retry-After", "")
+                delay = (
+                    float(retry_after)
+                    if retry_after.replace(".", "", 1).isdigit()
+                    else delays[attempt]
+                )
+                time.sleep(min(delay, 20.0))
+                continue
+            try:
+                resp.raise_for_status()
+                answers = resp.json()["answers"]
+            except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+                raise DecisionError(f"jev call failed: {exc}") from exc
+            if not isinstance(answers, dict):
+                raise DecisionError("jev returned a non-object answers map")
+            return answers
+        raise DecisionError("jev call failed: retries exhausted")
 
 
 class JevClaimSupportBackend:
