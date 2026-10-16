@@ -428,6 +428,44 @@
         </p>
       </article>
 
+      <article>
+        <div class="entry-head">
+          <span class="date">Sat 17 Oct</span>
+          <h2>Gemma takes the checker seat</h2>
+          <span class="stamp blue">Gate passed</span>
+        </div>
+        <p>
+          Google DeepMind joined the hackathon as a technology partner partway through the week,
+          with Gemma as part of the deal. Gemma-4-31B-IT turned out to be already served on the
+          same AMD Token Factory endpoint the rest of the pipeline runs on, so moving the checker
+          seat from Qwen3.8-27B to Gemma was a configuration change, not a rebuild: same API, same
+          key, one setting.
+        </p>
+        <p>
+          It went through the gate like everything else. The 15-question pack re-ran against the
+          new configuration: <strong>14/15</strong>, the ISO trap blocked, zero unsupported claims
+          shipped, and the whole run took <strong>154 seconds</strong>.
+        </p>
+        <p>
+          One thing to be straight about: in that run the decision layer settled all 23 claims
+          before any of them escalated, so Gemma itself never fired during the pack. The same was
+          true of the Qwen run; the calibrated decision layer resolves this pack decisively, which
+          means the gate on its own proves the system holds with Gemma wired in, not that
+          Gemma&rsquo;s own verdicts are good.
+        </p>
+        <p>
+          So I probed Gemma directly in the checker role, with three claims: one the documents
+          support, the ISO&nbsp;27001 trap claim, and a borderline overgeneralisation. It returned
+          the correct verdict on all three. On the trap, its reasoning was the right one: SOC&nbsp;2
+          is present in the documents, ISO is absent. Each check took 2 to 4 seconds.
+        </p>
+        <p>
+          The swap then went live on Vercel and was verified on the public URL: the health check
+          names Gemma as the checker, and a live question answered end to end under the new
+          configuration.
+        </p>
+      </article>
+
       <section class="rule-box">
         <h2>The rule the whole week ran on</h2>
         <p>
@@ -444,6 +482,33 @@
           and no unsupported claim flagged as shipped, with the same one flaky question still
           failing the way it failed before. That is slower than shipping on a good feeling, but a tool whose whole job
           is checking claims should probably be built that way.
+        </p>
+      </section>
+
+      <section class="rule-box">
+        <h2>The stack, the method, the results</h2>
+        <p>
+          <strong>The stack.</strong> DeepSeek-V4.1-Flash, served by AMD Token Factory, drafts each
+          answer from the company&rsquo;s documents. Jev (jev-1.13.0) then scores every claim
+          against the passage it cites: 0.80 or above ships, 0.30 or below is cut, and anything
+          between escalates to Gemma-4-31B-IT as checker. Whatever neither layer can settle goes
+          to a human review queue with the full evidence trail, and the finished answer sheet is
+          dispatched into an Evolus workflow.
+        </p>
+        <p>
+          <strong>The method.</strong> Claims are drafted only from the company&rsquo;s own
+          documents, with citations, and every claim is scored against its cited passage before it
+          can ship. Every configuration change had to pass the same gate: 14/15 on the labelled
+          pack, the trap blocked, zero unsupported claims shipped. The checking itself was also
+          graded externally, on Stanford&rsquo;s ContractNLI, run through the app&rsquo;s own
+          checker rather than a bespoke benchmark script.
+        </p>
+        <p>
+          <strong>The results.</strong> On ContractNLI, a word-overlap rules grader scored 59.2%
+          and falsely approved 384 claims. Jev scored 82.1% with 36 false approvals, at a median of
+          about 0.77 seconds per claim. The 15-question pack took 677 seconds with the chat model
+          making the decisions, 440 seconds with calibrated Jev, and 154 seconds in the final
+          configuration, with Gemma in the checker seat.
         </p>
       </section>
 
