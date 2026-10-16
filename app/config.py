@@ -12,7 +12,10 @@ class Settings:
     checker_model: str = "Qwen/Qwen2.5-32B-Instruct"
     decision_base_url: str = "http://localhost:8002"
     decision_model: str = "vllm-sr/d3-lite"
-    decision_backend: str = "d3"  # "d3" sidecar | "llm" chat model | "rules"
+    decision_backend: str = "d3"  # "d3" | "llm" | "jev" | "rules"
+    typesafe_base_url: str = "https://api.typesafe.ai"
+    typesafe_api_key: str = ""
+    jev_model: str = "jev-1.13.0"  # pinned; jev-latest moves
     evolus_api_base: str = ""
     evolus_api_key: str = ""
     evolus_application_id: str = ""
@@ -32,6 +35,11 @@ def load_settings() -> Settings:
         decision_backend=os.environ.get(
             "DECISION_BACKEND", Settings.decision_backend
         ),
+        typesafe_base_url=os.environ.get(
+            "TYPESAFE_BASE_URL", Settings.typesafe_base_url
+        ),
+        typesafe_api_key=os.environ.get("TYPESAFE_API_KEY", ""),
+        jev_model=os.environ.get("JEV_MODEL", Settings.jev_model),
         evolus_api_base=os.environ.get("EVOLUS_API_BASE", ""),
         evolus_api_key=os.environ.get("EVOLUS_API_KEY", ""),
         evolus_application_id=os.environ.get("EVOLUS_APPLICATION_ID", ""),

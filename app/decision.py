@@ -404,8 +404,114 @@ class LLMClaimSupportBackend:
         )
 
 
+# ------------------------------------------------------------------
+# Jev decision backend (TypeSafe System One API). Jev is a hosted
+# decision model, not a chat model: one endpoint,
+# POST {typesafe_base_url}/v1/systemone, taking a `state` plus a map
+# of typed questions and returning typed answers. Claim support maps
+# to a single Noul question — the probability the statement is true
+# given the state — with the passage as the state. The absence
+# discipline from the LLM backend's system prompt is carried into
+# the Noul instructions in substance: absence counts as supported
+# only on explicit exclusivity. The model is pinned via JEV_MODEL
+# (default jev-1.13.0) so results are reproducible; jev-latest
+# moves. Selected with DECISION_BACKEND=jev for claim support;
+# triage deliberately keeps the chat-model backend under "jev"
+# until Jev's Score scale is verified against the live API, rather
+# than guessing the mapping. Any transport error, malformed answer,
+# or out-of-range value raises DecisionError and the services fall
+# back to rules, with the backend named in every result, exactly
+# like the other backends.
+# ------------------------------------------------------------------
+
+_JEV_SUPPORT_INSTRUCTIONS = (
+    "Considering only the passage given as the state, is the "
+    "following statement fully supported by it?\n\nStatement: {claim}\n\n"
+    "Fully supported means the passage explicitly states or directly "
+    "entails every part of the statement. A statement about absence "
+    "(that something is not mentioned, not offered, or that no other "
+    "option exists) is supported ONLY if the passage states the fact "
+    "exclusively (words like 'only' or 'sole'); a passage that merely "
+    "fails to mention something does not support a statement about "
+    "it at all."
+)
+
+
+class _JevClient:
+    """Thin wrapper over the TypeSafe System One endpoint. Unlike
+    the d3 sidecar (direct infrastructure traffic), this is a
+    public API reached through the environment's normal egress, so
+    httpx keeps its default proxy handling."""
+
+    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+        self._base = settings.typesafe_base_url.rstrip("/")
+        self._model = settings.jev_model
+        self._key = settings.typesafe_api_key
+        self._timeout = timeout
+
+    def evaluate(self, state: str, questions: dict) -> dict:
+        if not self._key:
+            raise DecisionError("TYPESAFE_API_KEY is not set")
+        try:
+            resp = httpx.post(
+                f"{self._base}/v1/systemone",
+                json={
+                    "state": state,
+                    "model": self._model,
+                    "questions": questions,
+                },
+                headers={"Authorization": f"Bearer {self._key}"},
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            answers = resp.json()["answers"]
+        except (httpx.HTTPError, KeyError, TypeError, ValueError) as exc:
+            raise DecisionError(f"jev call failed: {exc}") from exc
+        if not isinstance(answers, dict):
+            raise DecisionError("jev returned a non-object answers map")
+        return answers
+
+
+class JevClaimSupportBackend:
+    name = "jev"
+
+    def __init__(self, settings: Settings, timeout: float = 30.0) -> None:
+        self._jev = _JevClient(settings, timeout=timeout)
+
+    def claim_support(self, claim: str, passage: str) -> ClaimSupportResult:
+        answers = self._jev.evaluate(
+            passage,
+            {
+                "support": {
+                    "type": "noul",
+                    "instructions": _JEV_SUPPORT_INSTRUCTIONS.format(
+                        claim=claim
+                    ),
+                }
+            },
+        )
+        try:
+            probability = float(answers["support"]["noul"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DecisionError(
+                f"jev claim-support answer malformed: {exc}"
+            ) from exc
+        if not 0.0 <= probability <= 1.0:
+            raise DecisionError("jev claim-support probability outside 0..1")
+        return ClaimSupportResult(
+            claim=claim,
+            supported=probability >= 0.5,
+            probability=probability,
+            backend=self.name,
+        )
+
+
 def _triage_backend(settings: Settings, timeout: float):
     if settings.decision_backend == "llm":
+        return LLMTriageBackend(settings, timeout=max(timeout, 30.0))
+    if settings.decision_backend == "jev":
+        # Jev is wired for claim support in this build; triage keeps
+        # the chat-model backend (see the Jev section above).
         return LLMTriageBackend(settings, timeout=max(timeout, 30.0))
     if settings.decision_backend == "rules":
         return RulesDecisionBackend()
@@ -415,6 +521,8 @@ def _triage_backend(settings: Settings, timeout: float):
 def _claim_support_backend(settings: Settings, timeout: float):
     if settings.decision_backend == "llm":
         return LLMClaimSupportBackend(settings, timeout=max(timeout, 30.0))
+    if settings.decision_backend == "jev":
+        return JevClaimSupportBackend(settings, timeout=max(timeout, 30.0))
     if settings.decision_backend == "rules":
         return RulesClaimSupportBackend()
     return HTTPClaimSupportBackend(settings, timeout=timeout)

@@ -59,3 +59,108 @@ def test_triage_endpoint_shape_without_d3():
     assert body[0]["category"] == "data-retention"
     assert body[0]["backend"] == "rules"
     assert body[0]["answerable"] is None
+
+
+# ------------------------------------------------------------------
+# Jev backend: the wire shape is pinned against a fake transport —
+# state is the passage, one Noul question carries the claim and the
+# absence rule, the model is pinned, and the key travels as a
+# bearer header. Failures must degrade to the rules fallback,
+# never to an invented score.
+# ------------------------------------------------------------------
+
+import httpx
+
+from app.decision import ClaimSupportService, JevClaimSupportBackend
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+def _jev_settings(**overrides):
+    base = {"decision_backend": "jev", "typesafe_api_key": "test-key"}
+    base.update(overrides)
+    return Settings(**base)
+
+
+def test_jev_claim_support_maps_noul_probability(monkeypatch):
+    seen = {}
+
+    def fake_post(url, json=None, headers=None, timeout=None):
+        seen.update(url=url, json=json, headers=headers)
+        return _FakeResponse(
+            {"answers": {"support": {"type": "noul", "noul": 0.93}}}
+        )
+
+    monkeypatch.setattr("app.decision.httpx.post", fake_post)
+    result = JevClaimSupportBackend(_jev_settings()).claim_support(
+        "Data at rest is encrypted with AES-256.",
+        "All data at rest is encrypted with AES-256 (AWS KMS).",
+    )
+    assert result.backend == "jev"
+    assert result.probability == 0.93
+    assert result.supported is True
+    assert seen["url"] == "https://api.typesafe.ai/v1/systemone"
+    assert seen["headers"]["Authorization"] == "Bearer test-key"
+    assert seen["json"]["model"] == "jev-1.13.0"
+    assert seen["json"]["state"].startswith("All data at rest")
+    question = seen["json"]["questions"]["support"]
+    assert question["type"] == "noul"
+    assert "AES-256" in question["instructions"]
+    assert "exclusively" in question["instructions"]  # absence rule
+
+
+def test_jev_claim_support_low_probability_is_unsupported(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.httpx.post",
+        lambda *a, **k: _FakeResponse(
+            {"answers": {"support": {"type": "noul", "noul": 0.12}}}
+        ),
+    )
+    result = JevClaimSupportBackend(_jev_settings()).claim_support(
+        "We are ISO 27001 certified.", "We hold a SOC 2 Type II report."
+    )
+    assert result.supported is False
+    assert result.probability == 0.12
+
+
+def test_jev_missing_key_falls_back_to_rules():
+    service = ClaimSupportService(_jev_settings(typesafe_api_key=""))
+    result = service.claim_support(
+        "Data is encrypted.", "Data is encrypted at rest."
+    )
+    assert result.backend == "rules"
+
+
+def test_jev_transport_error_falls_back_to_rules(monkeypatch):
+    def boom(*a, **k):
+        raise httpx.ConnectError("down")
+
+    monkeypatch.setattr("app.decision.httpx.post", boom)
+    service = ClaimSupportService(_jev_settings())
+    result = service.claim_support(
+        "Data is encrypted.", "Data is encrypted at rest."
+    )
+    assert result.backend == "rules"
+
+
+def test_jev_out_of_range_probability_falls_back_to_rules(monkeypatch):
+    monkeypatch.setattr(
+        "app.decision.httpx.post",
+        lambda *a, **k: _FakeResponse(
+            {"answers": {"support": {"type": "noul", "noul": 1.4}}}
+        ),
+    )
+    service = ClaimSupportService(_jev_settings())
+    result = service.claim_support(
+        "Data is encrypted.", "Data is encrypted at rest."
+    )
+    assert result.backend == "rules"
