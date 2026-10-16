@@ -75,9 +75,21 @@ DECISION_BACKEND=llm   python -m eval.external.contractnli grade --backend llm -
   approves contract language far too freely; the rules backend
   is an emergency fallback, and this number is the evidence.
 
-### jev (full test split)
+### jev (full test split, n=2,091, at the adapter's 0.5 cut)
 
-_Pending the grading run._
+- Accuracy **0.8207** — Entailment 0.6498 (n=968),
+  Contradiction 0.9091 (n=220), NotMentioned 0.9823 (n=903).
+- **False approvals: 36** (1.7% of items; rules: 384).
+- Fallbacks to rules: **0** — every verdict was really Jev.
+- Median latency **767 ms** per call (this VM, via egress
+  proxy, 4 workers).
+- Probability distribution by gold class (the calibration
+  evidence): Entailment p25 0.33 / median 0.66 / p75 0.86 /
+  p90 0.96 — a third of truly supported claims score below the
+  0.5 cut. NotMentioned median 0.02, p90 0.06; Contradiction
+  median 0.01, p90 0.47. Jev is decisive when the answer is no
+  and conservative when it is yes; the 0.5 cut spends that
+  conservatism as lost Entailment recall.
 
 ### llm (stratified subset, n=300)
 
