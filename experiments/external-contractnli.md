@@ -93,8 +93,44 @@ DECISION_BACKEND=llm   python -m eval.external.contractnli grade --backend llm -
 
 ### llm (stratified subset, n=300)
 
-_Pending: runs after the Jev sample-eval gate, per the shared
-quota guard._
+Run 2026-10-17 (IST) with the fixed proxy shim, exact command
+(local-only launcher in the goal's working files; it injects
+the vault credentials and delegates to the harness above, with
+`DECISION_MODEL=DeepSeek-V4.1-Flash`):
+
+```
+~/workspace/proofdesk/.venv/bin/python run_cnli.py grade --backend llm --subset stratified300 --workers 4
+```
+
+- Accuracy **0.8467** as graded — Entailment 0.7770 (n=139),
+  Contradiction 0.8438 (n=32), NotMentioned 0.9225 (n=129).
+- **False approvals: 15** (5.0% of items; rules: 384 of 2,091,
+  jev: 36 of 2,091 — both full split).
+- Fallbacks to rules: **62 of 300 (20.7%)** — this run is NOT
+  clean, so the headline above mixes two backends and is not
+  the LLM's grade. The service falls back on any failed LLM
+  call; the failure itself is not recorded per item, only the
+  backend that answered (`backend_actual` in the results
+  file). Split by the backend that actually answered:
+  - **llm-answered (n=238): accuracy 0.9328** — Entailment
+    0.9255 (n=94), Contradiction 0.8929 (n=28), NotMentioned
+    0.9483 (n=116). False approvals: 9. Median latency
+    **3,538 ms** per call. Probability distribution by gold
+    class: Entailment p25 0.90 / median 0.95; NotMentioned
+    median 0.05, p90 0.10; Contradiction median 0.05,
+    p90 0.85.
+  - **rules-fallback (n=62): accuracy 0.5161** — Entailment
+    0.4667 (n=45), Contradiction 0.5000 (n=4), NotMentioned
+    0.6923 (n=13). False approvals: 6. Median latency
+    **32,973 ms** per call (the wait before falling back).
+- Median latency **6,710 ms** per call as graded (this VM,
+  via egress proxy, 4 workers).
+- The fallbacks are not class-proportional (45 of 62 are
+  Entailment items), so the llm-answered per-class figures
+  rest on fewer items than the subset's class counts —
+  Entailment on 94 of 139. Read the LLM's grade as the
+  llm-answered split, with that caveat; a clean full LLM
+  grade needs a rerun with zero (or near-zero) fallbacks.
 
 ## Notes
 
